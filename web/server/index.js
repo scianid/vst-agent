@@ -709,6 +709,57 @@ app.get('/api/projects', async (req, res) => {
   }
 })
 
+// Rename project
+app.post('/api/projects/:projectName/rename', async (req, res) => {
+  const { projectName } = req.params
+  const { newName } = req.body
+
+  if (!newName) {
+    return res.status(400).json({ error: 'Missing new name' })
+  }
+
+  // Validate new name (alphanumeric + underscores only)
+  if (!/^[a-zA-Z0-9_]+$/.test(newName)) {
+    return res.status(400).json({ error: 'Invalid name. Use only letters, numbers, and underscores.' })
+  }
+
+  const oldDir = path.join(PLUGINS_DIR, projectName)
+  const newDir = path.join(PLUGINS_DIR, newName)
+
+  try {
+    // Check if new name exists
+    try {
+      await fs.access(newDir)
+      return res.status(400).json({ error: 'Project with this name already exists' })
+    } catch {}
+
+    // Rename directory
+    await fs.rename(oldDir, newDir)
+
+    // Update CMakeLists.txt
+    const cmakePath = path.join(newDir, 'CMakeLists.txt')
+    try {
+      const cmakeContent = generateCMakeLists(newName)
+      await fs.writeFile(cmakePath, cmakeContent)
+    } catch (e) {
+      console.error('Failed to update CMakeLists.txt:', e)
+    }
+
+    // Update CLAUDE.md
+    const claudePath = path.join(newDir, 'CLAUDE.md')
+    try {
+      let claudeContent = await fs.readFile(claudePath, 'utf-8')
+      claudeContent = claudeContent.replace(new RegExp(projectName, 'g'), newName)
+      await fs.writeFile(claudePath, claudeContent)
+    } catch {}
+
+    res.json({ success: true, newName })
+  } catch (error) {
+    console.error('Rename error:', error)
+    res.status(500).json({ error: 'Failed to rename project' })
+  }
+})
+
 // Get file tree for a project
 app.get('/api/files/:projectName', async (req, res) => {
   const { projectName } = req.params

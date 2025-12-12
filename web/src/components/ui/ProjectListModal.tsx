@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Folder, Clock, Search, Loader2 } from 'lucide-react'
+import { X, Folder, Clock, Search, Loader2, Pencil, Check } from 'lucide-react'
 
 interface Project {
   name: string
@@ -18,10 +18,14 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [editingProject, setEditingProject] = useState<string | null>(null)
+  const [newName, setNewName] = useState('')
+  const [renaming, setRenaming] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       fetchProjects()
+      setEditingProject(null)
     }
   }, [isOpen])
 
@@ -38,6 +42,41 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleRename = async (currentName: string) => {
+    if (!newName.trim() || newName === currentName) {
+      setEditingProject(null)
+      return
+    }
+
+    setRenaming(true)
+    try {
+      const res = await fetch(`/api/projects/${currentName}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: newName.trim() })
+      })
+
+      if (res.ok) {
+        await fetchProjects()
+        setEditingProject(null)
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Failed to rename project')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Failed to rename project')
+    } finally {
+      setRenaming(false)
+    }
+  }
+
+  const startEditing = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingProject(project.name)
+    setNewName(project.name)
   }
 
   const filteredProjects = projects.filter(p => 
@@ -93,24 +132,70 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
                   </div>
                 ) : (
                   filteredProjects.map(project => (
-                    <button
+                    <div
                       key={project.name}
-                      onClick={() => onSelectProject(project.name)}
-                      className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all text-left group"
+                      className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all text-left group relative"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-white transition-colors shadow-lg shadow-accent/5">
-                        <Folder className="w-5 h-5" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-medium text-white/90 group-hover:text-white transition-colors">{project.name}</h3>
-                        <div className="flex items-center gap-4 mt-1 text-xs text-white/50 group-hover:text-white/70 transition-colors">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(project.modified).toLocaleDateString()} {new Date(project.modified).toLocaleTimeString()}
-                          </span>
+                      <div 
+                        className="flex-1 flex items-center gap-4 cursor-pointer"
+                        onClick={() => !editingProject && onSelectProject(project.name)}
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-white transition-colors shadow-lg shadow-accent/5">
+                          <Folder className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1">
+                          {editingProject === project.name ? (
+                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                value={newName}
+                                onChange={e => setNewName(e.target.value)}
+                                className="bg-black/50 border border-accent/50 rounded px-2 py-1 text-sm text-white outline-none w-full"
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') handleRename(project.name)
+                                  if (e.key === 'Escape') setEditingProject(null)
+                                }}
+                              />
+                              <button 
+                                onClick={() => handleRename(project.name)}
+                                disabled={renaming}
+                                className="p-1 hover:bg-green-500/20 text-green-500 rounded"
+                              >
+                                {renaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                              </button>
+                              <button 
+                                onClick={() => setEditingProject(null)}
+                                disabled={renaming}
+                                className="p-1 hover:bg-red-500/20 text-red-500 rounded"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <h3 className="font-medium text-white/90 group-hover:text-white transition-colors">{project.name}</h3>
+                              <div className="flex items-center gap-4 mt-1 text-xs text-white/50 group-hover:text-white/70 transition-colors">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {new Date(project.modified).toLocaleDateString()} {new Date(project.modified).toLocaleTimeString()}
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
-                    </button>
+                      
+                      {!editingProject && (
+                        <button
+                          onClick={(e) => startEditing(project, e)}
+                          className="p-2 text-white/30 hover:text-white hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                          title="Rename project"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   ))
                 )}
               </div>
@@ -120,4 +205,5 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
       )}
     </AnimatePresence>
   )
+}
 }
