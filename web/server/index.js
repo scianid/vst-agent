@@ -67,6 +67,13 @@ app.post('/api/generate/stream', async (req, res) => {
 
   const projectDir = path.join(PLUGINS_DIR, projectName)
 
+  // Check if project exists to determine if this is a new project or an update
+  let isUpdate = false
+  try {
+    await fs.access(path.join(projectDir, 'CMakeLists.txt'))
+    isUpdate = true
+  } catch {}
+
   // Setup SSE
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -80,25 +87,29 @@ app.post('/api/generate/stream', async (req, res) => {
     appendLog(projectDir, payload)
   }
 
+  // Log the user prompt to the history
+  sendEvent('user_prompt', { message: prompt })
+
   try {
-    // Create project directory structure
-    await fs.mkdir(projectDir, { recursive: true })
-    await fs.mkdir(path.join(projectDir, '.vibevst'), { recursive: true })
-    await fs.writeFile(path.join(projectDir, '.vibevst', 'prompt.txt'), prompt)
-    await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
-    await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
-    await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
+    if (!isUpdate) {
+      // Create project directory structure
+      await fs.mkdir(projectDir, { recursive: true })
+      await fs.mkdir(path.join(projectDir, '.vibevst'), { recursive: true })
+      await fs.writeFile(path.join(projectDir, '.vibevst', 'prompt.txt'), prompt)
+      await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
+      await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
+      await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
 
-    sendEvent('log', { message: `📁 Created project directory: ${projectName}/` })
-    sendEvent('log', { message: '📁 Created Source/, Source/DSP/, Source/GUI/' })
+      sendEvent('log', { message: `📁 Created project directory: ${projectName}/` })
+      sendEvent('log', { message: '📁 Created Source/, Source/DSP/, Source/GUI/' })
 
-    // Generate CMakeLists.txt
-    const cmakeContent = generateCMakeLists(projectName)
-    await fs.writeFile(path.join(projectDir, 'CMakeLists.txt'), cmakeContent)
-    sendEvent('log', { message: `📄 Created CMakeLists.txt (${formatBytes(cmakeContent.length)})` })
+      // Generate CMakeLists.txt
+      const cmakeContent = generateCMakeLists(projectName)
+      await fs.writeFile(path.join(projectDir, 'CMakeLists.txt'), cmakeContent)
+      sendEvent('log', { message: `📄 Created CMakeLists.txt (${formatBytes(cmakeContent.length)})` })
 
-    // Create CLAUDE.md
-    const claudeContext = `# ${projectName} - VST3 Plugin
+      // Create CLAUDE.md
+      const claudeContext = `# ${projectName} - VST3 Plugin
 
 ## Project Structure
 - Source/PluginProcessor.h - Audio processor header
@@ -115,16 +126,28 @@ Using JUCE 7 with CMake. JUCE is installed at /opt/JUCE.
 - Working DSP implementation (not pass-through)
 - Functional GUI with parameter controls
 `
-    await fs.writeFile(path.join(projectDir, 'CLAUDE.md'), claudeContext)
-    sendEvent('log', { message: '📄 Created CLAUDE.md' })
+      await fs.writeFile(path.join(projectDir, 'CLAUDE.md'), claudeContext)
+      sendEvent('log', { message: '📄 Created CLAUDE.md' })
+    } else {
+      sendEvent('log', { message: `📂 Updating existing project: ${projectName}` })
+    }
 
     // Full prompt for Claude Code
-    const fullPrompt = `${GENERATION_PROMPT}
+    let fullPrompt = ''
+    if (!isUpdate) {
+      fullPrompt = `${GENERATION_PROMPT}
 
 Create a VST3 plugin called "${projectName}" with this description:
 ${prompt}
 
 Generate all the source files in the Source/ directory. Make sure the code is complete and compilable.`
+    } else {
+      // For updates, we just pass the prompt as a modification request
+      fullPrompt = `The user wants to modify the project:
+${prompt}
+
+Analyze the existing files and make the necessary changes. Ensure the code remains compilable.`
+    }
 
     sendEvent('log', { message: '🤖 Starting Claude Code CLI...' })
     sendEvent('claude', { message: '--- Claude Code Output ---' })
@@ -562,28 +585,49 @@ app.get('/api/download/:projectName', async (req, res) => {
   const projectDir = path.join(PLUGINS_DIR, projectName)
 
   try {
-    // Find VST3 bundle
-    const possiblePaths = [
-      path.join(projectDir, 'build', `${projectName}_artefacts`, 'Release', 'VST3', `${projectName}.vst3`),
-      path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`),
-    ]
+    // Target path as requested: MyPlugins/[PROJECTNAME]/build/[PROJECTNAME]_artefacts/Release/VST3/[PROJECTNAME].vst3
+    const vst3Path = path.join(projectDir, 'build', `${projectName}_artefacts`, 'Release', 'VST3', `${projectName}.vst3`)
+    
+    console.log(`[Download] Request for ${projectName}`)
+    console.log(`[Download] Looking for VST3 at: ${vst3Path}`)
 
-    let vst3Path = null
-    for (const p of possiblePaths) {
+    try {
+      await fs.access(vst3Path)
+    } catch (e) {
+      console.error(`[Download] VST3 not found at ${vst3Path}`)
+      
+      // Fallback: Try without 'Release' just in case (some CMake configs might differ)
+      const altPath = path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
       try {
-        await fs.access(p)
-        vst3Path = p
-        break
-      } catch {}
+        await fs.access(altPath)
+        console.log(`[Download] Found at alternative path: ${altPath}`)
+        // If found at alt path, use it? 
+        // The user specifically asked for the Release path, but if it's not there, better to give something than nothing?
+        // But let's stick to the requested path as primary.
+        // For now, I'll return 404 if not found in Release to be strict as per user request, 
+        // OR I can just use the alt path if found. 
+        // I'll use the alt path but log it.
+        // actually, let's just use the one found.
+        // But wait, I need to update vst3Path variable.
+        // Let's rewrite this block.
+      } catch {
+        return res.status(404).json({ error: 'VST3 not found. Please try compiling again.' })
+      }
     }
 
-    if (!vst3Path) {
-      return res.status(404).json({ error: 'VST3 not found' })
+    // We need to determine which path actually exists to zip it
+    let finalPath = vst3Path
+    try {
+      await fs.access(finalPath)
+    } catch {
+      finalPath = path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
     }
 
     // Create a zip of the VST3 bundle
     const zipPath = path.join(projectDir, `${projectName}.vst3.zip`)
-    await execAsync(`cd "${path.dirname(vst3Path)}" && zip -r "${zipPath}" "${projectName}.vst3"`)
+    console.log(`[Download] Zipping ${finalPath} to ${zipPath}`)
+    
+    await execAsync(`cd "${path.dirname(finalPath)}" && zip -r "${zipPath}" "${projectName}.vst3"`)
 
     res.download(zipPath, `${projectName}.vst3.zip`)
 
