@@ -1,0 +1,61 @@
+# =============================================================================
+# VibeVST .dockerignore
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# IDE and Editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts (we build inside the container)
+build/
+cmake-build*/
+*.o
+*.obj
+*.a
+*.lib
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment files with secrets
+.env
+.env.local
+*.env
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+__tests__/
+*.test.*
+
+# Large binary files
+*.vst3
+*.dll
+*.so
+*.dylib
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Node modules (if any)
+node_modules/
+
+# Logs
+*.log
+logs/

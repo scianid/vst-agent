@@ -1,0 +1,54 @@
+# =============================================================================
+# VibeVST Docker Compose Configuration
+# =============================================================================
+# Usage:
+#   1. Create a .env file with your API key (see .env.example)
+#   2. docker-compose up -d
+#   3. Open http://localhost:5173 in your browser
+#   4. docker-compose exec vibevst bash (for CLI access)
+# =============================================================================
+
+services:
+  vibevst:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vibevst-env:latest
+    container_name: vibevst
+    
+    # Keep the container running for interactive use
+    stdin_open: true
+    tty: true
+    
+    # Expose web UI and API ports
+    ports:
+      - "5173:5173"
+      - "3001:3001"
+    
+    # Mount your plugins folder for persistent storage
+    volumes:
+      - ./MyPlugins:/home/dev/MyPlugins
+      - ./web:/home/dev/web
+      # Optional: Mount a cache volume for faster rebuilds
+      - vibevst-cache:/home/dev/.cache
+    
+    # API Key from environment or .env file
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Configure the default AI model
+      - VIBEVST_DEFAULT_MODEL=${VIBEVST_DEFAULT_MODEL:-claude-sonnet-4-20250514}
+    
+    # Resource limits (optional, adjust as needed)
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+    
+    # Working directory inside the container
+    working_dir: /home/dev/MyPlugins
+
+volumes:
+  vibevst-cache:
+    driver: local
