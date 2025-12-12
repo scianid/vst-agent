@@ -43,6 +43,7 @@ app.post('/api/generate/stream', async (req, res) => {
   console.log('=== Generate Request (Streaming) ===')
   console.log('Project:', projectName)
   console.log('Prompt:', prompt)
+  console.log('API Key received:', apiKey ? `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)} (length: ${apiKey.length})` : 'NONE')
 
   if (!prompt || !apiKey || !projectName) {
     console.log('Error: Missing required fields')
@@ -109,9 +110,17 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     sendEvent('claude', { message: '--- Claude Code Output ---' })
 
     // Run Claude Code CLI with streaming JSON output and verbose/debug mode
-    const claudeProcess = spawn('claude', [
+    // We run 'node' directly on the CLI script to avoid path/symlink issues
+    const claudeScriptPath = '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'
+    
+    console.log(`🚀 Spawning: node ${claudeScriptPath}`)
+    
+    const claudeProcess = spawn('node', [
+      claudeScriptPath,
       '-p', fullPrompt,
       '--output-format', 'stream-json',
+      '--include-partial-messages',
+      '--no-session-persistence',
       '--verbose',
       '-d',
       '--dangerously-skip-permissions'
@@ -119,7 +128,9 @@ Generate all the source files in the Source/ directory. Make sure the code is co
       cwd: projectDir,
       env: {
         ...process.env,
-        ANTHROPIC_API_KEY: apiKey
+        ANTHROPIC_API_KEY: apiKey,
+        FORCE_COLOR: '1', // Force color output (sometimes helps with TTY detection)
+        CI: '1' // Sometimes helps tools behave in non-interactive mode
       }
     })
 
@@ -129,6 +140,9 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     claudeProcess.stdout.on('data', (data) => {
       const text = data.toString()
       stdout += text
+      // Log raw output to server console for debugging
+      console.log('Claude stdout chunk:', text.substring(0, 100) + (text.length > 100 ? '...' : ''))
+      
       // Parse streaming JSON and send relevant info to UI
       text.split('\n').forEach(line => {
         if (!line.trim()) return
@@ -138,18 +152,23 @@ Generate all the source files in the Source/ directory. Make sure the code is co
             // Assistant message with content
             json.message.content.forEach(c => {
               if (c.type === 'text' && c.text) {
-                sendEvent('claude', { message: c.text.substring(0, 200) })
+                sendEvent('claude', { message: c.text })
               } else if (c.type === 'tool_use') {
                 sendEvent('claude', { message: `🔧 Using tool: ${c.name}` })
               }
             })
           } else if (json.type === 'result') {
             sendEvent('claude', { message: `✅ ${json.subtype || 'Done'}` })
+          } else if (json.type === 'error' || json.error) {
+             sendEvent('claude_error', { message: json.error?.message || json.error || 'Unknown error' })
           }
         } catch {
           // Not JSON, send raw text
           if (line.trim()) {
-            sendEvent('claude', { message: line.substring(0, 200) })
+            // Only send if it doesn't look like a partial JSON line
+            if (!line.trim().startsWith('{')) {
+               sendEvent('claude', { message: line.substring(0, 200) })
+            }
           }
         }
       })
@@ -499,6 +518,73 @@ app.get('/api/download/:projectName', async (req, res) => {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
+})
+
+// Validate API key - makes a minimal request to Anthropic to verify the key works
+app.post('/api/validate-key', async (req, res) => {
+  const { apiKey } = req.body
+
+  console.log('=== Validate API Key Request ===')
+  console.log('API Key received:', apiKey ? `${apiKey.substring(0, 15)}...${apiKey.substring(apiKey.length - 4)} (length: ${apiKey.length})` : 'NONE')
+
+  if (!apiKey) {
+    return res.status(400).json({ valid: false, error: 'No API key provided' })
+  }
+
+  // Check format
+  if (!apiKey.startsWith('sk-ant-api03-')) {
+    return res.status(400).json({ 
+      valid: false, 
+      error: 'Invalid format. Anthropic API keys start with sk-ant-api03-' 
+    })
+  }
+
+  try {
+    // Make a minimal API call to verify the key
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+
+    const data = await response.json()
+    console.log('Anthropic response status:', response.status)
+
+    if (response.ok) {
+      console.log('API key validated successfully')
+      res.json({ valid: true })
+    } else if (response.status === 401) {
+      console.log('Invalid API key:', data.error?.message)
+      res.status(401).json({ 
+        valid: false, 
+        error: 'Invalid API key. Please check your key and try again.' 
+      })
+    } else if (response.status === 429) {
+      // Rate limited but key is valid
+      console.log('Rate limited but key is valid')
+      res.json({ valid: true })
+    } else {
+      console.log('API error:', data.error?.message)
+      res.status(response.status).json({ 
+        valid: false, 
+        error: data.error?.message || 'Failed to validate key' 
+      })
+    }
+  } catch (error) {
+    console.error('Validation error:', error)
+    res.status(500).json({ 
+      valid: false, 
+      error: 'Failed to connect to Anthropic API' 
+    })
+  }
 })
 
 // =============================================================================

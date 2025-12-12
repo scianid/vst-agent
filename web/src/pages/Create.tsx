@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowRight, Sparkles, Key, Eye, EyeOff, Check, Loader2, Download, Hammer, Terminal, X, FolderTree, File, ChevronRight, ChevronDown, Code, Copy } from 'lucide-react'
+import { ArrowRight, Sparkles, Check, Loader2, Download, Hammer, Terminal, X, FolderTree, File, ChevronRight, ChevronDown, Code, Copy, Settings, AlertCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { SettingsModal } from '@/components/ui/SettingsModal'
 
 type BuildStatus = 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
 
@@ -15,9 +16,6 @@ interface FileNode {
 
 export function Create() {
   const [prompt, setPrompt] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const [keySaved, setKeySaved] = useState(false)
   const [status, setStatus] = useState<BuildStatus>('idle')
   const [projectName, setProjectName] = useState('')
   const [logs, setLogs] = useState<string[]>([])
@@ -30,15 +28,14 @@ export function Create() {
   const [loadingFile, setLoadingFile] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['Source']))
   const [copied, setCopied] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [isConnected, setIsConnected] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
-  // Load API key from localStorage on mount
+  // Check for API key on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('anthropic_api_key')
-    if (savedKey) {
-      setApiKey(savedKey)
-      setKeySaved(true)
-    }
+    setIsConnected(!!savedKey)
   }, [])
 
   // Auto-scroll logs
@@ -46,12 +43,8 @@ export function Create() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  const handleSaveKey = () => {
-    if (apiKey.trim()) {
-      localStorage.setItem('anthropic_api_key', apiKey.trim())
-      setKeySaved(true)
-      setTimeout(() => setKeySaved(false), 2000)
-    }
+  const handleConnectionChange = (connected: boolean) => {
+    setIsConnected(connected)
   }
 
   const addLog = (message: string, type: 'info' | 'success' | 'error' | 'file' = 'info') => {
@@ -116,8 +109,10 @@ export function Create() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!prompt.trim()) return
-    if (!apiKey.trim()) {
-      alert('Please enter your Anthropic API key first')
+    
+    const apiKey = localStorage.getItem('anthropic_api_key')
+    if (!apiKey) {
+      setShowSettings(true)
       return
     }
 
@@ -143,7 +138,7 @@ export function Create() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: prompt.trim(),
-          apiKey: apiKey.trim(),
+          apiKey: apiKey,
           projectName: name
         })
       })
@@ -375,54 +370,33 @@ export function Create() {
           Create VST plugins by describing what you want.
         </motion.p>
 
-        {/* API Key Input */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-          className="w-full max-w-2xl mb-4"
-        >
-          <div className="bg-bg-secondary border border-border rounded-xl p-3">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 text-text-secondary">
-                <Key className="w-4 h-4" />
-                <span className="text-sm font-medium">Anthropic API Key</span>
+        {/* API Key Status Banner - only show if not connected */}
+        {!isConnected && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+            className="w-full max-w-2xl mb-4"
+          >
+            <button
+              onClick={() => setShowSettings(true)}
+              className="w-full bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex items-center gap-3 hover:bg-yellow-500/20 transition-colors text-left"
+            >
+              <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-500">API Key Required</p>
+                <p className="text-xs text-text-tertiary">Click to configure your Anthropic API key</p>
               </div>
-              <div className="flex-1 relative">
-                <input
-                  type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-ant-..."
-                  className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 pr-20 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent transition-colors"
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    className="p-1.5 text-text-tertiary hover:text-text-secondary transition-colors"
-                  >
-                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveKey}
-                    disabled={!apiKey.trim()}
-                    className="p-1.5 text-text-tertiary hover:text-accent disabled:opacity-40 transition-colors"
-                  >
-                    {keySaved ? <Check className="w-4 h-4 text-green-500" /> : <span className="text-xs font-medium">Save</span>}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
+              <Settings className="w-4 h-4 text-text-tertiary" />
+            </button>
+          </motion.div>
+        )}
 
         {/* Input Card */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.25 }}
+          transition={{ duration: 0.4, delay: isConnected ? 0.2 : 0.25 }}
           className="w-full max-w-2xl"
         >
           <form onSubmit={handleSubmit}>
@@ -439,12 +413,31 @@ export function Create() {
               {/* Bottom bar */}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
                 <div className="flex items-center gap-2 text-text-tertiary text-xs">
-                  {apiKey ? (
-                    <span className="flex items-center gap-1 text-green-500">
-                      <Check className="w-3 h-3" /> API key set
-                    </span>
+                  {isConnected ? (
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center gap-1 text-green-500">
+                        <Check className="w-3 h-3" /> Ready to build
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem('anthropic_api_key')
+                          setIsConnected(false)
+                        }}
+                        className="text-text-tertiary hover:text-red-400 transition-colors"
+                        title="Clear API key"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   ) : (
-                    <span>Enter API key above</span>
+                    <button 
+                      type="button"
+                      onClick={() => setShowSettings(true)}
+                      className="flex items-center gap-1 text-yellow-500 hover:text-yellow-400 transition-colors"
+                    >
+                      <Settings className="w-3 h-3" /> Configure API key
+                    </button>
                   )}
                 </div>
                 
@@ -466,7 +459,7 @@ export function Create() {
                   {status === 'idle' && (
                     <button
                       type="submit"
-                      disabled={!prompt.trim() || !apiKey.trim()}
+                      disabled={!prompt.trim() || !isConnected}
                       className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-full transition-colors"
                     >
                       Build now
@@ -500,7 +493,7 @@ export function Create() {
                       type="button"
                       onClick={() => {
                         setShowFileViewer(!showFileViewer)
-                        if (!fileTree) fetchFileTree()
+                        if (fileTree.length === 0) fetchFileTree()
                       }}
                       className={`inline-flex items-center gap-2 px-4 py-2.5 border text-sm font-medium rounded-full transition-colors ${
                         showFileViewer 
@@ -555,19 +548,22 @@ export function Create() {
                   {projectName && (
                     <span className="text-xs text-text-tertiary">— {projectName}</span>
                   )}
+                  <span className="ml-auto text-xs text-text-tertiary">{logs.length} lines</span>
                 </div>
-                <div className="p-4 max-h-48 overflow-y-auto font-mono text-xs">
+                <div className="p-4 max-h-80 overflow-y-auto font-mono text-xs scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                   {logs.map((log, i) => (
                     <div 
                       key={i} 
                       className={`${
-                        log.includes('✗') || log.includes('Error') 
+                        log.includes('✗') || log.includes('Error') || log.includes('⚠️') || log.includes('❌')
                           ? 'text-red-400' 
-                          : log.includes('✓') || log.includes('successful') 
+                          : log.includes('✓') || log.includes('successful') || log.includes('✅')
                             ? 'text-green-400' 
                             : log.includes('📄') 
                               ? 'text-blue-400'
-                              : 'text-text-tertiary'
+                              : log.includes('🤖')
+                                ? 'text-purple-400'
+                                : 'text-text-tertiary'
                       }`}
                     >
                       {log}
@@ -615,9 +611,24 @@ export function Create() {
                         <FileTreeNode key={node.path} node={node} />
                       ))
                     ) : (
-                      <div className="flex items-center justify-center h-full text-text-tertiary text-sm">
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        Loading...
+                      <div className="flex flex-col items-center justify-center h-full text-text-tertiary text-sm gap-2">
+                        {status === 'generating' ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Generating files...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FolderTree className="w-8 h-8 opacity-20" />
+                            <span>No files found</span>
+                            <button 
+                              onClick={fetchFileTree}
+                              className="text-xs text-accent hover:underline mt-1"
+                            >
+                              Refresh
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -688,7 +699,12 @@ export function Create() {
         )}
       </main>
 
-      {/* Subtle glow effect at bottom - removed since we have bg image */}
+      {/* Settings Modal */}
+      <SettingsModal 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)}
+        onConnectionChange={handleConnectionChange}
+      />
     </div>
   )
 }
