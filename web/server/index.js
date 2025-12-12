@@ -133,11 +133,8 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     // We run 'node' directly on the CLI script to avoid path/symlink issues
     const claudeScriptPath = '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'
     
-<<<<<<< HEAD
-=======
     console.log(`🚀 Spawning: node ${claudeScriptPath}`)
     
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
     const claudeProcess = spawn('node', [
       claudeScriptPath,
       '-p', fullPrompt,
@@ -152,16 +149,10 @@ Generate all the source files in the Source/ directory. Make sure the code is co
       env: {
         ...process.env,
         ANTHROPIC_API_KEY: apiKey,
-<<<<<<< HEAD
-        FORCE_COLOR: '1',
-        CI: '1'
-      },
-      stdio: ['ignore', 'pipe', 'pipe'] // Explicitly set stdio
-=======
         FORCE_COLOR: '1', // Force color output (sometimes helps with TTY detection)
         CI: '1' // Sometimes helps tools behave in non-interactive mode
-      }
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
+      },
+      stdio: ['ignore', 'pipe', 'pipe'] // Explicitly set stdio
     })
 
     let stdout = ''
@@ -172,11 +163,8 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     claudeProcess.stdout.on('data', (data) => {
       const text = data.toString()
       stdout += text
-<<<<<<< HEAD
-=======
       // Log raw output to server console for debugging
       console.log('Claude stdout chunk:', text.substring(0, 100) + (text.length > 100 ? '...' : ''))
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
       
       // Parse streaming JSON and send relevant info to UI
       text.split('\n').forEach(line => {
@@ -200,10 +188,7 @@ Generate all the source files in the Source/ directory. Make sure the code is co
         } catch {
           // Not JSON, send raw text
           if (line.trim()) {
-<<<<<<< HEAD
-=======
             // Only send if it doesn't look like a partial JSON line
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
             if (!line.trim().startsWith('{')) {
                sendEvent('claude', { message: line.substring(0, 200) })
             }

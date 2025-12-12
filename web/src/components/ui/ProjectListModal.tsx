@@ -206,4 +206,3 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
     </AnimatePresence>
   )
 }
-}
