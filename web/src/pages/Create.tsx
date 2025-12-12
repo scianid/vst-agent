@@ -821,16 +821,12 @@ export function Create() {
         onClose={() => setShowSettings(false)}
         onConnectionChange={handleConnectionChange}
       />
-<<<<<<< HEAD
-
       {/* Project List Modal */}
       <ProjectListModal
         isOpen={showProjects}
         onClose={() => setShowProjects(false)}
         onSelectProject={handleLoadProject}
       />
-=======
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
     </div>
   )
 }
