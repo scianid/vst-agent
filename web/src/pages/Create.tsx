@@ -490,6 +490,18 @@ export function Create() {
           <span className="font-semibold text-base">VibeVST</span>
         </Link>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="relative p-2 text-text-secondary hover:text-text-primary hover:bg-bg-secondary/50 rounded-lg transition-colors"
+            title={isConnected ? 'Connected to Anthropic' : 'Configure API Key'}
+          >
+            <Settings className="w-5 h-5" />
+            <span 
+              className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
+                isConnected ? 'bg-green-500' : 'bg-yellow-500'
+              }`} 
+            />
+          </button>
           <button 
             onClick={() => setShowProjects(true)}
             className="text-sm text-text-secondary hover:text-text-primary transition-colors flex items-center gap-2"
@@ -497,12 +509,6 @@ export function Create() {
             <FolderOpen className="w-4 h-4" />
             Load Project
           </button>
-          <Link 
-            to="/browse" 
-            className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-          >
-            Browse Prompts
-          </Link>
         </div>
       </nav>
 
@@ -651,9 +657,9 @@ export function Create() {
             <span className="text-text-tertiary text-sm">Try:</span>
             {[
               { label: '3 band EQ', prompt: 'make me a simple 3 band eq plugin' },
-              { label: 'Chorus effect', prompt: 'Chorus effect' },
-              { label: 'Spectral analyzer', prompt: 'Spectral analyzer' },
-              { label: 'Lo-fi plugin', prompt: 'Lo-fi plugin' }
+              { label: 'Chorus effect', prompt: 'Create a VST chorus plugin with a simple rectangular interface. Place round knobs for rate, depth, mix, stereo width, delay offset, and warmth in one or two evenly spaced rows, with clear labels under each control. Include a small switch or dropdown for selecting Soft, Wide, or Deep mode, and add a compact display area showing current values or modulation activity. Style the interface with a minimal, consistent look focused on clarity and usability: evenly spaced elements, uniform knob sizes, readable text, subtle separation between sections, no clutter, and a balanced, symmetrical layout. The effect should sound smooth and wide, work well on synths, guitars, and vocals.' },
+              { label: 'Spectral analyzer', prompt: 'Create a VST spectral analyzer plugin with a simple rectangular interface. The main area should display a real-time frequency spectrum with adjustable resolution and smoothing. Include controls for scale (linear/log), speed, smoothing amount, peak hold, and range. Add a small settings panel or dropdown for FFT size, window type, and refresh rate. Style the interface with a minimal, consistent layout focused on clarity and readability: evenly spaced controls, clear labels beneath each control, uniform sizes, and an unobstructed visualization area. Keep the design clean, organized, and easy to interpret, with no unnecessary decoration. The analyzer should update smoothly, and accurately display frequencies across the full audio range.' },
+              { label: 'Lo-fi plugin', prompt: 'Create a VST lo-fi effect plugin with a simple rectangular interface. Include round knobs for bit depth, sample rate reduction, noise amount, wobble intensity, wobble rate, saturation, and mix, arranged in one or two evenly spaced rows with clear labels beneath each control. Add a small toggle or menu for selecting different lo-fi modes such as Tape, Vinyl, and Digital. Include a compact display area that shows activity or current parameter values. Use a minimal, organized layout focused on clarity, even spacing, uniform control sizes, readable text, and no unnecessary decoration. The effect should deliver warm, degraded textures with controllable character while remaining stable and CPU-efficient.' }
             ].map((example) => (
               <button
                 key={example.label}
@@ -690,7 +696,7 @@ export function Create() {
                     <span className="font-medium truncate w-full">{project.name}</span>
                   </div>
                   <div className="text-xs text-text-tertiary">
-                    Last modified: {new Date(project.modified).toLocaleDateString()}
+                    Last modified: {new Date(project.modified).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                   </div>
                 </button>
               ))}
