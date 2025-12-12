@@ -113,11 +113,13 @@ RUN pip3 install --no-cache-dir \
     jinja2
 
 # =============================================================================
-# Layer 5: Node.js for Web UI
+# Layer 5: Node.js for Web UI and Claude Code CLI
 # =============================================================================
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Install Claude Code CLI globally
+    && npm install -g @anthropic-ai/claude-code
 
 # =============================================================================
 # Layer 5: Development User & Environment Setup

@@ -4,7 +4,6 @@ import { spawn, exec } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs/promises'
-import Anthropic from '@anthropic-ai/sdk'
 
 const execAsync = promisify(exec)
 const app = express()
@@ -17,113 +16,352 @@ app.use(express.json())
 const PLUGINS_DIR = process.env.PLUGINS_DIR || '/home/dev/MyPlugins'
 
 // =============================================================================
-// VST Code Generation Prompt
+// VST Code Generation Prompt for Claude Code
 // =============================================================================
-const SYSTEM_PROMPT = `You are an expert JUCE C++ developer specializing in VST3 plugin development.
-You will generate complete, working VST3 plugin code based on user descriptions.
+const GENERATION_PROMPT = `You are creating a JUCE VST3 plugin. Create the following files:
+1. Source/PluginProcessor.h - Audio processor header
+2. Source/PluginProcessor.cpp - Audio processor implementation with actual DSP
+3. Source/PluginEditor.h - GUI editor header  
+4. Source/PluginEditor.cpp - GUI editor with controls
 
-IMPORTANT RULES:
-1. Generate COMPLETE, compilable C++ code - no placeholders or TODOs
-2. Use JUCE 7 API syntax
-3. Use modern C++20 features
-4. Include all necessary #includes
-5. Implement actual DSP processing, not pass-through
-6. Create a functional GUI with controls
-
-OUTPUT FORMAT:
-Return a JSON object with this structure:
-{
-  "files": [
-    {
-      "path": "Source/PluginProcessor.h",
-      "content": "// complete file content"
-    },
-    {
-      "path": "Source/PluginProcessor.cpp", 
-      "content": "// complete file content"
-    },
-    {
-      "path": "Source/PluginEditor.h",
-      "content": "// complete file content"
-    },
-    {
-      "path": "Source/PluginEditor.cpp",
-      "content": "// complete file content"
-    }
-  ]
-}
-
-Include any additional DSP files in Source/DSP/ if needed.
-ONLY output the JSON, no explanations.`
+IMPORTANT:
+- Use JUCE 7 API syntax
+- Use modern C++20 features
+- Include all necessary #includes
+- Implement actual DSP processing, not pass-through
+- Create a functional GUI with knobs/sliders for parameters
+- Use juce::AudioProcessorValueTreeState for parameters`
 
 // =============================================================================
 // API Routes
 // =============================================================================
 
-// Generate plugin code using Anthropic Claude
-app.post('/api/generate', async (req, res) => {
+// Generate plugin code using Claude Code CLI (with streaming logs)
+app.post('/api/generate/stream', async (req, res) => {
   const { prompt, apiKey, projectName } = req.body
 
+  console.log('=== Generate Request (Streaming) ===')
+  console.log('Project:', projectName)
+  console.log('Prompt:', prompt)
+
   if (!prompt || !apiKey || !projectName) {
+    console.log('Error: Missing required fields')
     return res.status(400).json({ error: 'Missing required fields' })
   }
 
+  // Setup SSE
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+
+  const sendEvent = (type, data) => {
+    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`)
+  }
+
   try {
-    const anthropic = new Anthropic({ apiKey })
-
-    console.log(`Generating plugin: ${projectName}`)
-    console.log(`Prompt: ${prompt}`)
-
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Create a VST3 plugin called "${projectName}" with this description:\n\n${prompt}\n\nGenerate all the source files needed.`
-        }
-      ]
-    })
-
-    // Extract the text content
-    const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
-    
-    // Parse JSON from response (handle markdown code blocks)
-    let jsonStr = responseText
-    if (responseText.includes('```json')) {
-      jsonStr = responseText.split('```json')[1].split('```')[0].trim()
-    } else if (responseText.includes('```')) {
-      jsonStr = responseText.split('```')[1].split('```')[0].trim()
-    }
-
-    const generated = JSON.parse(jsonStr)
-    
-    // Create project directory
+    // Create project directory structure
     const projectDir = path.join(PLUGINS_DIR, projectName)
     await fs.mkdir(projectDir, { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
 
-    // Write generated files
-    for (const file of generated.files) {
-      const filePath = path.join(projectDir, file.path)
-      const dir = path.dirname(filePath)
-      await fs.mkdir(dir, { recursive: true })
-      await fs.writeFile(filePath, file.content)
-      console.log(`  Created: ${file.path}`)
-    }
+    sendEvent('log', { message: `📁 Created project directory: ${projectName}/` })
+    sendEvent('log', { message: '📁 Created Source/, Source/DSP/, Source/GUI/' })
 
     // Generate CMakeLists.txt
     const cmakeContent = generateCMakeLists(projectName)
     await fs.writeFile(path.join(projectDir, 'CMakeLists.txt'), cmakeContent)
-    console.log('  Created: CMakeLists.txt')
+    sendEvent('log', { message: `📄 Created CMakeLists.txt (${formatBytes(cmakeContent.length)})` })
+
+    // Create CLAUDE.md
+    const claudeContext = `# ${projectName} - VST3 Plugin
+
+## Project Structure
+- Source/PluginProcessor.h - Audio processor header
+- Source/PluginProcessor.cpp - Audio processor with DSP
+- Source/PluginEditor.h - GUI editor header
+- Source/PluginEditor.cpp - GUI editor implementation
+
+## Build System
+Using JUCE 7 with CMake. JUCE is installed at /opt/JUCE.
+
+## Requirements
+- C++20
+- JUCE 7 API
+- Working DSP implementation (not pass-through)
+- Functional GUI with parameter controls
+`
+    await fs.writeFile(path.join(projectDir, 'CLAUDE.md'), claudeContext)
+    sendEvent('log', { message: '📄 Created CLAUDE.md' })
+
+    // Full prompt for Claude Code
+    const fullPrompt = `${GENERATION_PROMPT}
+
+Create a VST3 plugin called "${projectName}" with this description:
+${prompt}
+
+Generate all the source files in the Source/ directory. Make sure the code is complete and compilable.`
+
+    sendEvent('log', { message: '🤖 Starting Claude Code CLI...' })
+    sendEvent('claude', { message: '--- Claude Code Output ---' })
+
+    // Run Claude Code CLI - use -p for prompt mode (actually creates files)
+    const claudeProcess = spawn('claude', [
+      '-p', fullPrompt,
+      '--dangerously-skip-permissions'
+    ], {
+      cwd: projectDir,
+      env: {
+        ...process.env,
+        ANTHROPIC_API_KEY: apiKey
+      }
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    claudeProcess.stdout.on('data', (data) => {
+      const text = data.toString()
+      stdout += text
+      // Send each line separately for better UI display
+      text.split('\n').forEach(line => {
+        if (line.trim()) {
+          sendEvent('claude', { message: line })
+        }
+      })
+    })
+
+    claudeProcess.stderr.on('data', (data) => {
+      const text = data.toString()
+      stderr += text
+      text.split('\n').forEach(line => {
+        if (line.trim()) {
+          sendEvent('claude_error', { message: line })
+        }
+      })
+    })
+
+    await new Promise((resolve, reject) => {
+      claudeProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve(code)
+        } else {
+          reject(new Error(`Claude Code exited with code ${code}`))
+        }
+      })
+      claudeProcess.on('error', reject)
+    })
+
+    sendEvent('log', { message: '--- End Claude Code Output ---' })
+
+    // Scan created files
+    const files = []
+    const fileDetails = []
+    
+    async function scanDirectory(dir, relativePath = '') {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
+          
+          if (entry.isDirectory()) {
+            if (entry.name !== 'build' && !entry.name.startsWith('.')) {
+              await scanDirectory(fullPath, relPath)
+            }
+          } else {
+            const stat = await fs.stat(fullPath)
+            const lines = await countLines(fullPath)
+            files.push(relPath)
+            fileDetails.push({ path: relPath, size: stat.size, lines })
+            sendEvent('file', { path: relPath, size: formatBytes(stat.size), lines })
+          }
+        }
+      } catch (e) {
+        // Directory doesn't exist yet
+      }
+    }
+    
+    await scanDirectory(projectDir)
+
+    const totalSize = fileDetails.reduce((sum, f) => sum + f.size, 0)
+    const totalLines = fileDetails.reduce((sum, f) => sum + f.lines, 0)
+
+    sendEvent('complete', { 
+      success: true, 
+      projectName,
+      files,
+      fileDetails,
+      summary: {
+        totalFiles: files.length,
+        totalSize: formatBytes(totalSize),
+        totalLines
+      }
+    })
+
+    res.end()
+
+  } catch (error) {
+    console.error('Generation error:', error)
+    sendEvent('error', { message: error instanceof Error ? error.message : 'Generation failed' })
+    res.end()
+  }
+})
+
+// Generate plugin code using Claude Code CLI (non-streaming fallback)
+app.post('/api/generate', async (req, res) => {
+  const { prompt, apiKey, projectName } = req.body
+
+  console.log('=== Generate Request ===')
+  console.log('Project:', projectName)
+  console.log('Prompt:', prompt)
+
+  if (!prompt || !apiKey || !projectName) {
+    console.log('Error: Missing required fields')
+    return res.status(400).json({ error: 'Missing required fields' })
+  }
+
+  try {
+    // Create project directory structure
+    const projectDir = path.join(PLUGINS_DIR, projectName)
+    await fs.mkdir(projectDir, { recursive: true })
+    await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
+    await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
+    await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
+
+    console.log('📁 Created directory structure:')
+    console.log(`   └── ${projectName}/`)
+    console.log('       ├── Source/')
+    console.log('       │   ├── DSP/')
+    console.log('       │   └── GUI/')
+
+    // Generate CMakeLists.txt first so Claude knows the project structure
+    const cmakeContent = generateCMakeLists(projectName)
+    await fs.writeFile(path.join(projectDir, 'CMakeLists.txt'), cmakeContent)
+    console.log(`📄 Created: CMakeLists.txt (${formatBytes(cmakeContent.length)}, ${cmakeContent.split('\n').length} lines)`)
+
+    // Create a CLAUDE.md file with project context
+    const claudeContext = `# ${projectName} - VST3 Plugin
+
+## Project Structure
+- Source/PluginProcessor.h - Audio processor header
+- Source/PluginProcessor.cpp - Audio processor with DSP
+- Source/PluginEditor.h - GUI editor header
+- Source/PluginEditor.cpp - GUI editor implementation
+
+## Build System
+Using JUCE 7 with CMake. JUCE is installed at /opt/JUCE.
+
+## Requirements
+- C++20
+- JUCE 7 API
+- Working DSP implementation (not pass-through)
+- Functional GUI with parameter controls
+`
+    await fs.writeFile(path.join(projectDir, 'CLAUDE.md'), claudeContext)
+
+    // Full prompt for Claude Code
+    const fullPrompt = `${GENERATION_PROMPT}
+
+Create a VST3 plugin called "${projectName}" with this description:
+${prompt}
+
+Generate all the source files in the Source/ directory. Make sure the code is complete and compilable.`
+
+    console.log('Running Claude Code CLI...')
+
+    // Run Claude Code CLI with the prompt - use -p for prompt mode
+    const claudeProcess = spawn('claude', [
+      '-p', fullPrompt,
+      '--dangerously-skip-permissions'
+    ], {
+      cwd: projectDir,
+      env: {
+        ...process.env,
+        ANTHROPIC_API_KEY: apiKey
+      }
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    claudeProcess.stdout.on('data', (data) => {
+      stdout += data.toString()
+      console.log('Claude:', data.toString())
+    })
+
+    claudeProcess.stderr.on('data', (data) => {
+      stderr += data.toString()
+      console.error('Claude stderr:', data.toString())
+    })
+
+    await new Promise((resolve, reject) => {
+      claudeProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve(code)
+        } else {
+          reject(new Error(`Claude Code exited with code ${code}: ${stderr}`))
+        }
+      })
+      claudeProcess.on('error', reject)
+    })
+
+    // Check what files were created with detailed stats
+    const files = []
+    const fileDetails = []
+    
+    async function scanDirectory(dir, relativePath = '') {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
+          
+          if (entry.isDirectory()) {
+            if (entry.name !== 'build' && !entry.name.startsWith('.')) {
+              await scanDirectory(fullPath, relPath)
+            }
+          } else {
+            const stat = await fs.stat(fullPath)
+            files.push(relPath)
+            fileDetails.push({
+              path: relPath,
+              size: stat.size,
+              lines: await countLines(fullPath),
+              created: stat.birthtime
+            })
+            console.log(`📄 Created: ${relPath} (${formatBytes(stat.size)}, ${await countLines(fullPath)} lines)`)
+          }
+        }
+      } catch (e) {
+        // Directory doesn't exist yet
+      }
+    }
+    
+    await scanDirectory(projectDir)
+
+    console.log('=== Generation Complete ===')
+    console.log(`Total files created: ${files.length}`)
+    const totalSize = fileDetails.reduce((sum, f) => sum + f.size, 0)
+    const totalLines = fileDetails.reduce((sum, f) => sum + f.lines, 0)
+    console.log(`Total size: ${formatBytes(totalSize)}`)
+    console.log(`Total lines: ${totalLines}`)
+    console.log('Files:', files)
 
     res.json({ 
       success: true, 
       projectName,
-      files: generated.files.map(f => f.path)
+      files,
+      fileDetails,
+      summary: {
+        totalFiles: files.length,
+        totalSize: formatBytes(totalSize),
+        totalLines
+      },
+      output: stdout
     })
 
   } catch (error) {
@@ -151,7 +389,7 @@ app.post('/api/compile', async (req, res) => {
     console.log(`Compiling: ${projectName}`)
 
     // Configure with CMake
-    const configureCmd = `cd "${projectDir}" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=/opt/JUCE`
+    const configureCmd = `cd "${projectDir}" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/JUCE`
     console.log('Configure:', configureCmd)
     await execAsync(configureCmd)
 
@@ -233,8 +471,133 @@ app.get('/api/health', (req, res) => {
 })
 
 // =============================================================================
+// File Browser API Routes
+// =============================================================================
+
+// Get file tree for a project
+app.get('/api/files/:projectName', async (req, res) => {
+  const { projectName } = req.params
+
+  if (!projectName) {
+    return res.status(400).json({ error: 'Missing project name' })
+  }
+
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+
+  try {
+    await fs.access(projectDir)
+    
+    // Recursively build file tree
+    const tree = await buildFileTree(projectDir, '')
+    
+    res.json({ success: true, tree })
+  } catch (error) {
+    console.error('File tree error:', error)
+    res.status(500).json({ error: 'Failed to read project files' })
+  }
+})
+
+// Get file content
+app.get('/api/files/:projectName/content', async (req, res) => {
+  const { projectName } = req.params
+  const { path: filePath } = req.query
+
+  if (!projectName || !filePath) {
+    return res.status(400).json({ error: 'Missing project name or file path' })
+  }
+
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const fullPath = path.join(projectDir, filePath)
+
+  // Security check - ensure path is within project directory
+  const resolvedPath = path.resolve(fullPath)
+  const resolvedProjectDir = path.resolve(projectDir)
+  
+  if (!resolvedPath.startsWith(resolvedProjectDir)) {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+
+  try {
+    const content = await fs.readFile(fullPath, 'utf-8')
+    const stats = await fs.stat(fullPath)
+    
+    res.json({ 
+      success: true, 
+      content,
+      size: stats.size,
+      modified: stats.mtime
+    })
+  } catch (error) {
+    console.error('File read error:', error)
+    res.status(500).json({ error: 'Failed to read file' })
+  }
+})
+
+// Helper function to build file tree recursively
+async function buildFileTree(baseDir, relativePath) {
+  const fullPath = relativePath ? path.join(baseDir, relativePath) : baseDir
+  const entries = await fs.readdir(fullPath, { withFileTypes: true })
+  
+  const items = []
+  
+  for (const entry of entries) {
+    const itemRelPath = relativePath ? path.join(relativePath, entry.name) : entry.name
+    
+    // Skip build directory and hidden files
+    if (entry.name === 'build' || entry.name.startsWith('.')) {
+      continue
+    }
+    
+    if (entry.isDirectory()) {
+      const children = await buildFileTree(baseDir, itemRelPath)
+      items.push({
+        name: entry.name,
+        path: itemRelPath,
+        type: 'folder',
+        children
+      })
+    } else {
+      const stats = await fs.stat(path.join(fullPath, entry.name))
+      items.push({
+        name: entry.name,
+        path: itemRelPath,
+        type: 'file',
+        size: stats.size
+      })
+    }
+  }
+  
+  // Sort: folders first, then files
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  
+  return items
+}
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
+
+// Format bytes to human readable
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+// Count lines in a file
+async function countLines(filePath) {
+  try {
+    const content = await fs.readFile(filePath, 'utf-8')
+    return content.split('\n').length
+  } catch {
+    return 0
+  }
+}
 
 function generateCMakeLists(projectName) {
   return `cmake_minimum_required(VERSION 3.22)
