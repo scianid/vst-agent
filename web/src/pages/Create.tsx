@@ -670,13 +670,18 @@ export function Create() {
             className="mt-8 flex flex-wrap items-center justify-center gap-2"
           >
             <span className="text-text-tertiary text-sm">Try:</span>
-            {['Chorus effect', 'Spectral analyzer', 'Lo-fi plugin'].map((example) => (
+            {[
+              { label: '3 band EQ', prompt: 'make me a simple 3 band eq plugin' },
+              { label: 'Chorus effect', prompt: 'Chorus effect' },
+              { label: 'Spectral analyzer', prompt: 'Spectral analyzer' },
+              { label: 'Lo-fi plugin', prompt: 'Lo-fi plugin' }
+            ].map((example) => (
               <button
-                key={example}
-                onClick={() => setPrompt(example)}
+                key={example.label}
+                onClick={() => setPrompt(example.prompt)}
                 className="px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary bg-bg-secondary hover:bg-bg-tertiary border border-border rounded-full transition-colors"
               >
-                {example}
+                {example.label}
               </button>
             ))}
           </motion.div>

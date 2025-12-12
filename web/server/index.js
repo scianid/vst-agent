@@ -108,9 +108,12 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     sendEvent('log', { message: '🤖 Starting Claude Code CLI...' })
     sendEvent('claude', { message: '--- Claude Code Output ---' })
 
-    // Run Claude Code CLI - use -p for prompt mode (actually creates files)
+    // Run Claude Code CLI with streaming JSON output and verbose/debug mode
     const claudeProcess = spawn('claude', [
       '-p', fullPrompt,
+      '--output-format', 'stream-json',
+      '--verbose',
+      '-d',
       '--dangerously-skip-permissions'
     ], {
       cwd: projectDir,
@@ -126,10 +129,28 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     claudeProcess.stdout.on('data', (data) => {
       const text = data.toString()
       stdout += text
-      // Send each line separately for better UI display
+      // Parse streaming JSON and send relevant info to UI
       text.split('\n').forEach(line => {
-        if (line.trim()) {
-          sendEvent('claude', { message: line })
+        if (!line.trim()) return
+        try {
+          const json = JSON.parse(line)
+          if (json.type === 'assistant' && json.message?.content) {
+            // Assistant message with content
+            json.message.content.forEach(c => {
+              if (c.type === 'text' && c.text) {
+                sendEvent('claude', { message: c.text.substring(0, 200) })
+              } else if (c.type === 'tool_use') {
+                sendEvent('claude', { message: `🔧 Using tool: ${c.name}` })
+              }
+            })
+          } else if (json.type === 'result') {
+            sendEvent('claude', { message: `✅ ${json.subtype || 'Done'}` })
+          }
+        } catch {
+          // Not JSON, send raw text
+          if (line.trim()) {
+            sendEvent('claude', { message: line.substring(0, 200) })
+          }
         }
       })
     })
@@ -137,6 +158,7 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     claudeProcess.stderr.on('data', (data) => {
       const text = data.toString()
       stderr += text
+      console.log('Claude stderr:', text)
       text.split('\n').forEach(line => {
         if (line.trim()) {
           sendEvent('claude_error', { message: line })
@@ -146,13 +168,22 @@ Generate all the source files in the Source/ directory. Make sure the code is co
 
     await new Promise((resolve, reject) => {
       claudeProcess.on('close', (code) => {
+        console.log('Claude exited with code:', code)
         if (code === 0) {
           resolve(code)
         } else {
-          reject(new Error(`Claude Code exited with code ${code}`))
+          // Send the error to UI before rejecting
+          sendEvent('claude_error', { message: `Claude Code exited with code ${code}` })
+          if (stderr) {
+            sendEvent('claude_error', { message: `stderr: ${stderr.substring(0, 500)}` })
+          }
+          reject(new Error(`Claude Code exited with code ${code}: ${stderr}`))
         }
       })
-      claudeProcess.on('error', reject)
+      claudeProcess.on('error', (err) => {
+        sendEvent('claude_error', { message: `Process error: ${err.message}` })
+        reject(err)
+      })
     })
 
     sendEvent('log', { message: '--- End Claude Code Output ---' })
