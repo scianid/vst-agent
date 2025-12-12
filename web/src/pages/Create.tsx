@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Sparkles, Check, Loader2, X, Settings, AlertCircle, FolderOpen } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { SettingsModal } from '@/components/ui/SettingsModal'
 import { ProjectListModal } from '@/components/ui/ProjectListModal'
 import { IdeLayout, LogEntry } from '@/components/IdeLayout'
@@ -17,6 +17,8 @@ interface FileNode {
 }
 
 export function Create() {
+  const { projectName: urlProjectName } = useParams()
+  const navigate = useNavigate()
   const [prompt, setPrompt] = useState('')
   const [status, setStatus] = useState<BuildStatus>('idle')
   const [projectName, setProjectName] = useState('')
@@ -41,6 +43,71 @@ export function Create() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
+
+  // Load project from URL
+  useEffect(() => {
+    if (urlProjectName && urlProjectName !== projectName) {
+      loadProjectData(urlProjectName)
+    } else if (!urlProjectName && projectName) {
+      handleResetState()
+    }
+  }, [urlProjectName])
+
+  const loadProjectData = async (name: string) => {
+    // Reset state for new project
+    setStatus('generated')
+    setProjectName(name)
+    setLogs([])
+    setError('')
+    setDownloadUrl('')
+    setPrompt('')
+    setFileTree([])
+    setSelectedFile(null)
+    setFileContent('')
+    
+    addLog(`Loaded project: ${name}`, 'success')
+    
+    // Fetch prompt
+    try {
+      const res = await fetch(`/api/projects/${name}/prompt`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.prompt) {
+          setPrompt(data.prompt)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load prompt:', err)
+    }
+    
+    // Fetch logs
+    try {
+      const res = await fetch(`/api/projects/${name}/logs`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.logs && Array.isArray(data.logs)) {
+          setLogs(data.logs)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load logs:', err)
+    }
+
+    // Trigger file tree fetch
+    fetchFileTree(name)
+  }
+
+  const handleResetState = () => {
+    setStatus('idle')
+    setProjectName('')
+    setLogs([])
+    setError('')
+    setDownloadUrl('')
+    setPrompt('')
+    setFileTree([])
+    setSelectedFile(null)
+    setFileContent('')
+  }
 
   const handleConnectionChange = (connected: boolean) => {
     setIsConnected(connected)
@@ -348,52 +415,12 @@ export function Create() {
   }
 
   const handleReset = () => {
-    setStatus('idle')
-    setProjectName('')
-    setLogs([])
-    setError('')
-    setDownloadUrl('')
-    setPrompt('')
-    setFileTree([])
-    setSelectedFile(null)
-    setFileContent('')
+    navigate('/')
   }
 
-  const handleLoadProject = async (name: string) => {
-    handleReset()
-    setProjectName(name)
-    setStatus('generated')
+  const handleLoadProject = (name: string) => {
     setShowProjects(false)
-    addLog(`Loaded project: ${name}`, 'success')
-    
-    // Fetch prompt
-    try {
-      const res = await fetch(`/api/projects/${name}/prompt`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.prompt) {
-          setPrompt(data.prompt)
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load prompt:', err)
-    }
-    
-    // Fetch logs
-    try {
-      const res = await fetch(`/api/projects/${name}/logs`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.logs && Array.isArray(data.logs)) {
-          setLogs(data.logs)
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load logs:', err)
-    }
-
-    // Trigger file tree fetch
-    fetchFileTree(name)
+    navigate(`/projects/${name}`)
   }
 
   const isWorking = status === 'generating' || status === 'compiling'

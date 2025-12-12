@@ -6,6 +6,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Create />} />
+        <Route path="/projects/:projectName" element={<Create />} />
         <Route path="/browse" element={<Home />} />
       </Routes>
     </BrowserRouter>

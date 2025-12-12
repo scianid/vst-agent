@@ -197,63 +197,9 @@ export function IdeLayout({
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar: Files */}
+        {/* Left Panel: Chat & Logs */}
         <div 
-          className="border-r border-border flex flex-col bg-bg-secondary w-64"
-        >
-          <div className="p-3 border-b border-border flex items-center justify-between">
-            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Explorer</span>
-            <button onClick={onRefreshFiles} className="p-1 hover:bg-bg-tertiary rounded">
-              <Loader2 className="w-3 h-3 text-text-tertiary" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2">
-            {fileTree.map(node => <FileTreeNode key={node.path} node={node} />)}
-          </div>
-        </div>
-
-        {/* Center: Editor */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
-          {selectedFile ? (
-            <>
-              <div className="h-9 border-b border-border flex items-center justify-between px-4 bg-bg-primary">
-                <span className="text-xs text-text-tertiary font-mono">{selectedFile}</span>
-                <button
-                  onClick={copyToClipboard}
-                  className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-primary transition-colors"
-                >
-                  {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <Editor
-                  height="100%"
-                  language={getLanguageFromPath(selectedFile)}
-                  value={fileContent}
-                  theme="vs-dark"
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    padding: { top: 16 }
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-text-tertiary">
-              <div className="text-center">
-                <File className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                <p>Select a file to view</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right Panel: Chat & Logs */}
-        <div 
-          className="border-l border-border flex flex-col bg-bg-secondary w-96"
+          className="border-r border-border flex flex-col bg-bg-secondary w-96"
         >
           {/* Tabs */}
           <div className="flex border-b border-border">
@@ -298,7 +244,7 @@ export function IdeLayout({
                   {chatMessages.map((msg, i) => (
                     <div key={i} className={`flex flex-col ${msg.type === 'user_prompt' ? 'items-end' : 'items-start'}`}>
                       <div 
-                        className={`max-w-[90%] rounded-lg p-3 text-sm ${
+                        className={`max-w-[90%] rounded-lg p-3 text-sm break-words whitespace-pre-wrap ${
                           msg.type === 'user_prompt' 
                             ? 'bg-accent text-white' 
                             : msg.type === 'error' 
@@ -365,6 +311,60 @@ export function IdeLayout({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Center: Editor */}
+        <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
+          {selectedFile ? (
+            <>
+              <div className="h-9 border-b border-border flex items-center justify-between px-4 bg-bg-primary">
+                <span className="text-xs text-text-tertiary font-mono">{selectedFile}</span>
+                <button
+                  onClick={copyToClipboard}
+                  className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-primary transition-colors"
+                >
+                  {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <Editor
+                  height="100%"
+                  language={getLanguageFromPath(selectedFile)}
+                  value={fileContent}
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    padding: { top: 16 }
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-text-tertiary">
+              <div className="text-center">
+                <File className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                <p>Select a file to view</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Sidebar: Files */}
+        <div 
+          className="border-l border-border flex flex-col bg-bg-secondary w-64"
+        >
+          <div className="p-3 border-b border-border flex items-center justify-between">
+            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Explorer</span>
+            <button onClick={onRefreshFiles} className="p-1 hover:bg-bg-tertiary rounded">
+              <Loader2 className="w-3 h-3 text-text-tertiary" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {fileTree.map(node => <FileTreeNode key={node.path} node={node} />)}
           </div>
         </div>
       </div>
