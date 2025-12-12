@@ -12,6 +12,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "clsx": "^2.0.0",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",

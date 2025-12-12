@@ -15,6 +15,21 @@ app.use(express.json())
 // Plugin storage directory
 const PLUGINS_DIR = process.env.PLUGINS_DIR || '/home/dev/MyPlugins'
 
+// Helper to append logs to project
+async function appendLog(projectDir, entry) {
+  try {
+    const logDir = path.join(projectDir, '.vibevst')
+    await fs.mkdir(logDir, { recursive: true })
+    const logFile = path.join(logDir, 'logs.jsonl')
+    await fs.appendFile(logFile, JSON.stringify({
+      timestamp: new Date().toISOString(),
+      ...entry
+    }) + '\n')
+  } catch (e) {
+    console.error('Failed to save log:', e)
+  }
+}
+
 // =============================================================================
 // VST Code Generation Prompt for Claude Code
 // =============================================================================
@@ -43,11 +58,14 @@ app.post('/api/generate/stream', async (req, res) => {
   console.log('=== Generate Request (Streaming) ===')
   console.log('Project:', projectName)
   console.log('Prompt:', prompt)
+  console.log('API Key received:', apiKey ? `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)} (length: ${apiKey.length})` : 'NONE')
 
   if (!prompt || !apiKey || !projectName) {
     console.log('Error: Missing required fields')
     return res.status(400).json({ error: 'Missing required fields' })
   }
+
+  const projectDir = path.join(PLUGINS_DIR, projectName)
 
   // Setup SSE
   res.setHeader('Content-Type', 'text/event-stream')
@@ -57,13 +75,16 @@ app.post('/api/generate/stream', async (req, res) => {
   res.flushHeaders()
 
   const sendEvent = (type, data) => {
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`)
+    const payload = { type, ...data }
+    res.write(`data: ${JSON.stringify(payload)}\n\n`)
+    appendLog(projectDir, payload)
   }
 
   try {
     // Create project directory structure
-    const projectDir = path.join(PLUGINS_DIR, projectName)
     await fs.mkdir(projectDir, { recursive: true })
+    await fs.mkdir(path.join(projectDir, '.vibevst'), { recursive: true })
+    await fs.writeFile(path.join(projectDir, '.vibevst', 'prompt.txt'), prompt)
     await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
@@ -109,9 +130,15 @@ Generate all the source files in the Source/ directory. Make sure the code is co
     sendEvent('claude', { message: '--- Claude Code Output ---' })
 
     // Run Claude Code CLI with streaming JSON output and verbose/debug mode
-    const claudeProcess = spawn('claude', [
+    // We run 'node' directly on the CLI script to avoid path/symlink issues
+    const claudeScriptPath = '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'
+    
+    const claudeProcess = spawn('node', [
+      claudeScriptPath,
       '-p', fullPrompt,
       '--output-format', 'stream-json',
+      '--include-partial-messages',
+      '--no-session-persistence',
       '--verbose',
       '-d',
       '--dangerously-skip-permissions'
@@ -119,16 +146,22 @@ Generate all the source files in the Source/ directory. Make sure the code is co
       cwd: projectDir,
       env: {
         ...process.env,
-        ANTHROPIC_API_KEY: apiKey
-      }
+        ANTHROPIC_API_KEY: apiKey,
+        FORCE_COLOR: '1',
+        CI: '1'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'] // Explicitly set stdio
     })
 
     let stdout = ''
     let stderr = ''
 
+    // Handle stdout
+    claudeProcess.stdout.setEncoding('utf8')
     claudeProcess.stdout.on('data', (data) => {
       const text = data.toString()
       stdout += text
+      
       // Parse streaming JSON and send relevant info to UI
       text.split('\n').forEach(line => {
         if (!line.trim()) return
@@ -138,23 +171,29 @@ Generate all the source files in the Source/ directory. Make sure the code is co
             // Assistant message with content
             json.message.content.forEach(c => {
               if (c.type === 'text' && c.text) {
-                sendEvent('claude', { message: c.text.substring(0, 200) })
+                sendEvent('claude', { message: c.text })
               } else if (c.type === 'tool_use') {
                 sendEvent('claude', { message: `🔧 Using tool: ${c.name}` })
               }
             })
           } else if (json.type === 'result') {
             sendEvent('claude', { message: `✅ ${json.subtype || 'Done'}` })
+          } else if (json.type === 'error' || json.error) {
+             sendEvent('claude_error', { message: json.error?.message || json.error || 'Unknown error' })
           }
         } catch {
           // Not JSON, send raw text
           if (line.trim()) {
-            sendEvent('claude', { message: line.substring(0, 200) })
+            if (!line.trim().startsWith('{')) {
+               sendEvent('claude', { message: line.substring(0, 200) })
+            }
           }
         }
       })
     })
 
+    // Handle stderr
+    claudeProcess.stderr.setEncoding('utf8')
     claudeProcess.stderr.on('data', (data) => {
       const text = data.toString()
       stderr += text
@@ -259,6 +298,8 @@ app.post('/api/generate', async (req, res) => {
     // Create project directory structure
     const projectDir = path.join(PLUGINS_DIR, projectName)
     await fs.mkdir(projectDir, { recursive: true })
+    await fs.mkdir(path.join(projectDir, '.vibevst'), { recursive: true })
+    await fs.writeFile(path.join(projectDir, '.vibevst', 'prompt.txt'), prompt)
     await fs.mkdir(path.join(projectDir, 'Source'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'DSP'), { recursive: true })
     await fs.mkdir(path.join(projectDir, 'Source', 'GUI'), { recursive: true })
@@ -418,15 +459,18 @@ app.post('/api/compile', async (req, res) => {
     await fs.access(projectDir)
 
     console.log(`Compiling: ${projectName}`)
+    await appendLog(projectDir, { type: 'log', message: 'Starting compilation...' })
 
     // Configure with CMake
     const configureCmd = `cd "${projectDir}" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/JUCE`
     console.log('Configure:', configureCmd)
+    await appendLog(projectDir, { type: 'log', message: 'Running CMake configure...' })
     await execAsync(configureCmd)
 
     // Build
     const buildCmd = `cd "${projectDir}" && cmake --build build --config Release -j$(nproc)`
     console.log('Build:', buildCmd)
+    await appendLog(projectDir, { type: 'log', message: 'Building project...' })
     const { stdout, stderr } = await execAsync(buildCmd)
 
     console.log('Build output:', stdout)
@@ -445,6 +489,8 @@ app.post('/api/compile', async (req, res) => {
       await fs.access(altPath)
     }
 
+    await appendLog(projectDir, { type: 'complete', message: 'Compilation successful!' })
+
     res.json({
       success: true,
       output: 'Build completed successfully',
@@ -453,6 +499,7 @@ app.post('/api/compile', async (req, res) => {
 
   } catch (error) {
     console.error('Compile error:', error)
+    await appendLog(projectDir, { type: 'error', message: `Compilation failed: ${error.message}` })
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Compilation failed'
     })
@@ -501,9 +548,146 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
 })
 
+// Validate API key - makes a minimal request to Anthropic to verify the key works
+app.post('/api/validate-key', async (req, res) => {
+  const { apiKey } = req.body
+
+  console.log('=== Validate API Key Request ===')
+  console.log('API Key received:', apiKey ? `${apiKey.substring(0, 15)}...${apiKey.substring(apiKey.length - 4)} (length: ${apiKey.length})` : 'NONE')
+
+  if (!apiKey) {
+    return res.status(400).json({ valid: false, error: 'No API key provided' })
+  }
+
+  // Check format
+  if (!apiKey.startsWith('sk-ant-api03-')) {
+    return res.status(400).json({ 
+      valid: false, 
+      error: 'Invalid format. Anthropic API keys start with sk-ant-api03-' 
+    })
+  }
+
+  try {
+    // Make a minimal API call to verify the key
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+
+    const data = await response.json()
+    console.log('Anthropic response status:', response.status)
+
+    if (response.ok) {
+      console.log('API key validated successfully')
+      res.json({ valid: true })
+    } else if (response.status === 401) {
+      console.log('Invalid API key:', data.error?.message)
+      res.status(401).json({ 
+        valid: false, 
+        error: 'Invalid API key. Please check your key and try again.' 
+      })
+    } else if (response.status === 429) {
+      // Rate limited but key is valid
+      console.log('Rate limited but key is valid')
+      res.json({ valid: true })
+    } else {
+      console.log('API error:', data.error?.message)
+      res.status(response.status).json({ 
+        valid: false, 
+        error: data.error?.message || 'Failed to validate key' 
+      })
+    }
+  } catch (error) {
+    console.error('Validation error:', error)
+    res.status(500).json({ 
+      valid: false, 
+      error: 'Failed to connect to Anthropic API' 
+    })
+  }
+})
+
 // =============================================================================
 // File Browser API Routes
 // =============================================================================
+
+// Get project logs
+app.get('/api/projects/:projectName/logs', async (req, res) => {
+  const { projectName } = req.params
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const logFile = path.join(projectDir, '.vibevst', 'logs.jsonl')
+  
+  try {
+    const content = await fs.readFile(logFile, 'utf-8')
+    const logs = content.trim().split('\n').map(line => {
+      try {
+        return JSON.parse(line)
+      } catch {
+        return null
+      }
+    }).filter(Boolean)
+    res.json({ success: true, logs })
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      return res.json({ success: true, logs: [] })
+    }
+    console.error('Read logs error:', e)
+    res.status(500).json({ error: 'Failed to read logs' })
+  }
+})
+
+// Get list of all projects
+app.get('/api/projects', async (req, res) => {
+  try {
+    console.log('Listing projects from:', PLUGINS_DIR)
+    // Ensure plugins directory exists
+    await fs.mkdir(PLUGINS_DIR, { recursive: true })
+    
+    const entries = await fs.readdir(PLUGINS_DIR, { withFileTypes: true })
+    console.log(`Found ${entries.length} entries`)
+    const projects = []
+    
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const projectPath = path.join(PLUGINS_DIR, entry.name)
+        try {
+          const stats = await fs.stat(projectPath)
+          // Check if it looks like a project (has CMakeLists.txt or Source folder)
+          const hasCmake = await fs.access(path.join(projectPath, 'CMakeLists.txt')).then(() => true).catch(() => false)
+          
+          if (hasCmake) {
+            projects.push({
+              name: entry.name,
+              modified: stats.mtime,
+              created: stats.birthtime
+            })
+          } else {
+             console.log(`Skipping ${entry.name}: No CMakeLists.txt`)
+          }
+        } catch (e) {
+          console.log(`Error checking ${entry.name}:`, e.message)
+        }
+      }
+    }
+    
+    console.log(`Returning ${projects.length} projects`)
+    // Sort by modified date (newest first)
+    projects.sort((a, b) => new Date(b.modified) - new Date(a.modified))
+    
+    res.json({ success: true, projects })
+  } catch (error) {
+    console.error('List projects error:', error)
+    res.status(500).json({ error: 'Failed to list projects' })
+  }
+})
 
 // Get file tree for a project
 app.get('/api/files/:projectName', async (req, res) => {
@@ -638,8 +822,8 @@ project(${projectName} VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find JUCE
-find_package(JUCE CONFIG REQUIRED)
+# Add JUCE
+add_subdirectory(/opt/JUCE JUCE)
 
 # Add the plugin target
 juce_add_plugin(${projectName}
@@ -708,6 +892,24 @@ target_link_libraries(${projectName}
 )
 `
 }
+
+// Get project prompt
+app.get('/api/projects/:projectName/prompt', async (req, res) => {
+  const { projectName } = req.params
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const promptFile = path.join(projectDir, '.vibevst', 'prompt.txt')
+  
+  try {
+    const prompt = await fs.readFile(promptFile, 'utf-8')
+    res.json({ success: true, prompt })
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      return res.json({ success: true, prompt: '' })
+    }
+    console.error('Read prompt error:', e)
+    res.status(500).json({ error: 'Failed to read prompt' })
+  }
+})
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {

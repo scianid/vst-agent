@@ -156,3 +156,11 @@ MIT License.
 -----
 
 ### Would you like me to generate the actual `Dockerfile` code based on this specification now?
+
+
+--------------
+
+
+Restart  vite in docker:
+
+docker exec vibevst pkill -f vite; Start-Sleep -Seconds 2; docker exec -d vibevst bash -c "cd /home/dev/web && npx vite --host 0.0.0.0 --port 5173 > /tmp/vite.log 2>&1"; Start-Sleep -Seconds 3; docker exec vibevst cat /tmp/vite.log
