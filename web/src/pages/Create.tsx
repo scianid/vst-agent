@@ -31,10 +31,7 @@ export function Create() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['Source']))
   const [copied, setCopied] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-<<<<<<< HEAD
   const [showProjects, setShowProjects] = useState(false)
-=======
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
   const [isConnected, setIsConnected] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
