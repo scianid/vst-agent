@@ -39,6 +39,7 @@ export function Create() {
   const [isConnected, setIsConnected] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Project[]>([])
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Check for API key on mount
   useEffect(() => {
@@ -46,6 +47,15 @@ export function Create() {
     setIsConnected(!!savedKey)
     fetchProjects()
   }, [])
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = 'auto'
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`
+    }
+  }, [prompt])
 
   const fetchProjects = async () => {
     try {
@@ -581,12 +591,14 @@ export function Create() {
           <form onSubmit={handleSubmit}>
             <div className="bg-black border border-border rounded-2xl p-4 shadow-2xl shadow-black/50">
               <textarea
+                ref={textareaRef}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe your plugin... e.g., A warm tape delay with adjustable wow and flutter, tempo sync, and a vintage-style GUI"
-                rows={3}
+                rows={1}
                 disabled={isWorking || status !== 'idle'}
-                className="w-full bg-transparent text-text-primary placeholder:text-text-tertiary text-base resize-none outline-none disabled:opacity-50"
+                className="w-full bg-transparent text-text-primary placeholder:text-text-tertiary text-base resize-none outline-none disabled:opacity-50 overflow-y-auto"
+                style={{ minHeight: '80px' }}
               />
               
               {/* Bottom bar */}
