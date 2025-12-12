@@ -1,16 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-<<<<<<< HEAD
 import { ArrowRight, Sparkles, Check, Loader2, Download, Hammer, Terminal, X, FolderTree, File, ChevronRight, ChevronDown, Code, Copy, Settings, AlertCircle, FolderOpen } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
 import { SettingsModal } from '@/components/ui/SettingsModal'
 import { ProjectListModal } from '@/components/ui/ProjectListModal'
-=======
-import { ArrowRight, Sparkles, Check, Loader2, Download, Hammer, Terminal, X, FolderTree, File, ChevronRight, ChevronDown, Code, Copy, Settings, AlertCircle } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { SettingsModal } from '@/components/ui/SettingsModal'
->>>>>>> a32bc79cb3c913c522f13a3d21e2fd39c9909d44
 
 type BuildStatus = 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
 
