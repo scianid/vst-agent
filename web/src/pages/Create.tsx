@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Sparkles, Check, Loader2, X, Settings, AlertCircle, FolderOpen } from 'lucide-react'
+import { ArrowRight, Sparkles, Check, Loader2, X, Settings, AlertCircle, FolderOpen, Clock, Folder } from 'lucide-react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { SettingsModal } from '@/components/ui/SettingsModal'
 import { ProjectListModal } from '@/components/ui/ProjectListModal'
@@ -31,13 +31,29 @@ export function Create() {
   const [showSettings, setShowSettings] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
+  const [recentProjects, setRecentProjects] = useState<string[]>([])
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Check for API key on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('anthropic_api_key')
     setIsConnected(!!savedKey)
+    fetchProjects()
   }, [])
+
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch('/api/projects')
+      if (res.ok) {
+        const data = await res.json()
+        if (data.projects && Array.isArray(data.projects)) {
+          setRecentProjects(data.projects)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch projects:', err)
+    }
+  }
 
   // Auto-scroll logs
   useEffect(() => {
@@ -507,7 +523,7 @@ export function Create() {
           className="text-center mb-4"
         >
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-            What will you <span className="italic text-accent mr-2">build</span> today?
+            Let's <span className="italic text-accent mr-2">create</span> something amazing!
           </h1>
         </motion.div>
 
@@ -641,6 +657,38 @@ export function Create() {
                 {example.label}
               </button>
             ))}
+          </motion.div>
+        )}
+
+        {/* Recent Projects */}
+        {status === 'idle' && recentProjects.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4, delay: 0.4 }}
+            className="mt-12 w-full max-w-4xl"
+          >
+            <div className="flex items-center gap-2 mb-4 text-text-secondary">
+              <Clock className="w-4 h-4" />
+              <span className="text-sm font-medium">Recent Projects</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {recentProjects.map((project) => (
+                <button
+                  key={project}
+                  onClick={() => handleLoadProject(project)}
+                  className="group flex flex-col items-start p-4 bg-bg-secondary/50 hover:bg-bg-secondary border border-border hover:border-accent/50 rounded-xl transition-all text-left"
+                >
+                  <div className="flex items-center gap-2 mb-2 text-text-primary group-hover:text-accent transition-colors">
+                    <Folder className="w-4 h-4" />
+                    <span className="font-medium truncate w-full">{project}</span>
+                  </div>
+                  <div className="text-xs text-text-tertiary">
+                    Click to open
+                  </div>
+                </button>
+              ))}
+            </div>
           </motion.div>
         )}
       </main>
