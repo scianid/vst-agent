@@ -56,10 +56,11 @@ export function Create() {
   }
 
   // Fetch file tree
-  const fetchFileTree = async () => {
-    if (!projectName) return
+  const fetchFileTree = async (nameOverride?: string) => {
+    const targetName = typeof nameOverride === 'string' ? nameOverride : projectName
+    if (!targetName) return
     try {
-      const response = await fetch(`/api/files/${projectName}`)
+      const response = await fetch(`/api/files/${targetName}`)
       if (response.ok) {
         const data = await response.json()
         setFileTree(data.tree || [])
@@ -199,7 +200,7 @@ export function Create() {
                   if (data.summary) {
                     addLog(`📊 Summary: ${data.summary.totalFiles} files, ${data.summary.totalSize}, ${data.summary.totalLines} lines`, 'success')
                   }
-                  setTimeout(fetchFileTree, 500)
+                  setTimeout(() => fetchFileTree(name), 500)
                   setStatus('generated')
                   break
                 case 'error':
@@ -228,8 +229,7 @@ export function Create() {
 
     setStatus('compiling')
     addLog('Starting compilation...')
-    addLog('Running CMake configure...')
-
+    
     try {
       const response = await fetch('/api/compile', {
         method: 'POST',
@@ -237,23 +237,52 @@ export function Create() {
         body: JSON.stringify({ projectName })
       })
 
-      // Try to parse response as text first
-      const text = await response.text()
-      let data
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error(text || 'Server returned invalid response')
-      }
-
       if (!response.ok) {
-        throw new Error(data.error || 'Compilation failed')
+        throw new Error('Failed to start compilation')
       }
 
-      addLog('Compilation successful!', 'success')
-      addLog(`Output: ${data.output}`)
-      setDownloadUrl(data.downloadUrl || `/api/download/${projectName}`)
-      setStatus('compiled')
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response stream')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              switch (data.type) {
+                case 'log':
+                  addLog(data.message)
+                  break
+                case 'complete':
+                  addLog(data.message, 'success')
+                  setDownloadUrl(data.downloadUrl)
+                  setStatus('compiled')
+                  break
+                case 'error':
+                  setError(data.message)
+                  addLog(`Compilation error: ${data.message}`, 'error')
+                  setStatus('error')
+                  break
+              }
+            } catch (err) {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       setError(message)
@@ -351,11 +380,9 @@ export function Create() {
       console.error('Failed to load logs:', err)
     }
 
-    // Trigger file tree fetch after state update
-    setTimeout(() => {
-      fetchFileTree()
-      setShowFileViewer(true)
-    }, 100)
+    // Trigger file tree fetch
+    fetchFileTree(name)
+    setShowFileViewer(true)
   }
 
   // Recursive file tree component

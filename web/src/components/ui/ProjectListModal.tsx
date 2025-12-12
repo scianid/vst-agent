@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Folder, Clock, Search, Loader2, Pencil, Check } from 'lucide-react'
+import { X, Folder, Clock, Search, Loader2, Pencil, Check, Trash2, AlertTriangle } from 'lucide-react'
 
 interface Project {
   name: string
@@ -19,13 +19,16 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [editingProject, setEditingProject] = useState<string | null>(null)
+  const [deletingProject, setDeletingProject] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       fetchProjects()
       setEditingProject(null)
+      setDeletingProject(null)
     }
   }, [isOpen])
 
@@ -73,10 +76,39 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
     }
   }
 
+  const handleDelete = async () => {
+    if (!deletingProject) return
+
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/projects/${deletingProject}`, {
+        method: 'DELETE'
+      })
+
+      if (res.ok) {
+        await fetchProjects()
+        setDeletingProject(null)
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Failed to delete project')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Failed to delete project')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const startEditing = (project: Project, e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingProject(project.name)
     setNewName(project.name)
+  }
+
+  const confirmDelete = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDeletingProject(project.name)
   }
 
   const filteredProjects = projects.filter(p => 
@@ -138,7 +170,7 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
                     >
                       <div 
                         className="flex-1 flex items-center gap-4 cursor-pointer"
-                        onClick={() => !editingProject && onSelectProject(project.name)}
+                        onClick={() => !editingProject && !deletingProject && onSelectProject(project.name)}
                       >
                         <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center text-accent group-hover:bg-accent group-hover:text-white transition-colors shadow-lg shadow-accent/5">
                           <Folder className="w-5 h-5" />
@@ -186,14 +218,23 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
                         </div>
                       </div>
                       
-                      {!editingProject && (
-                        <button
-                          onClick={(e) => startEditing(project, e)}
-                          className="p-2 text-white/30 hover:text-white hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                          title="Rename project"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                      {!editingProject && !deletingProject && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          <button
+                            onClick={(e) => startEditing(project, e)}
+                            className="p-2 text-white/30 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                            title="Rename project"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => confirmDelete(project, e)}
+                            className="p-2 text-white/30 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            title="Delete project"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))
@@ -201,6 +242,55 @@ export function ProjectListModal({ isOpen, onClose, onSelectProject }: ProjectLi
               </div>
             </div>
           </motion.div>
+
+          {/* Delete Confirmation Modal */}
+          <AnimatePresence>
+            {deletingProject && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setDeletingProject(null)}
+                  className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="relative w-full max-w-sm bg-[#1e1e1e] border border-white/10 rounded-xl p-6 shadow-2xl"
+                >
+                  <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-white mb-1">Delete Project?</h3>
+                      <p className="text-sm text-white/60">
+                        Are you sure you want to delete <span className="text-white font-medium">"{deletingProject}"</span>? This action cannot be undone.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 w-full mt-2">
+                      <button
+                        onClick={() => setDeletingProject(null)}
+                        disabled={deleting}
+                        className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </AnimatePresence>

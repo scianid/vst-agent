@@ -449,7 +449,7 @@ Generate all the source files in the Source/ directory. Make sure the code is co
   }
 })
 
-// Compile the plugin
+// Compile the plugin (streaming)
 app.post('/api/compile', async (req, res) => {
   const { projectName } = req.body
 
@@ -459,27 +459,75 @@ app.post('/api/compile', async (req, res) => {
 
   const projectDir = path.join(PLUGINS_DIR, projectName)
 
+  // Setup SSE
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+
+  const sendEvent = (type, data) => {
+    const payload = { type, ...data }
+    res.write(`data: ${JSON.stringify(payload)}\n\n`)
+    appendLog(projectDir, payload)
+  }
+
   try {
     // Check if project exists
     await fs.access(projectDir)
 
     console.log(`Compiling: ${projectName}`)
-    await appendLog(projectDir, { type: 'log', message: 'Starting compilation...' })
+    sendEvent('log', { message: 'Starting compilation...' })
 
     // Configure with CMake
-    const configureCmd = `cd "${projectDir}" && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/JUCE`
-    console.log('Configure:', configureCmd)
-    await appendLog(projectDir, { type: 'log', message: 'Running CMake configure...' })
-    await execAsync(configureCmd)
+    const configureCmd = `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/JUCE`
+    sendEvent('log', { message: `Running: ${configureCmd}` })
+    
+    const configProcess = spawn('cmake', ['-B', 'build', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_PREFIX_PATH=/opt/JUCE'], {
+      cwd: projectDir
+    })
+
+    configProcess.stdout.on('data', (data) => {
+      const text = data.toString().trim()
+      if (text) sendEvent('log', { message: text })
+    })
+
+    configProcess.stderr.on('data', (data) => {
+      const text = data.toString().trim()
+      if (text) sendEvent('log', { message: text })
+    })
+
+    await new Promise((resolve, reject) => {
+      configProcess.on('close', (code) => {
+        if (code === 0) resolve()
+        else reject(new Error(`CMake configure failed with code ${code}`))
+      })
+    })
 
     // Build
-    const buildCmd = `cd "${projectDir}" && cmake --build build --config Release -j$(nproc)`
-    console.log('Build:', buildCmd)
-    await appendLog(projectDir, { type: 'log', message: 'Building project...' })
-    const { stdout, stderr } = await execAsync(buildCmd)
+    const buildCmd = `cmake --build build --config Release -j$(nproc)`
+    sendEvent('log', { message: `Running: ${buildCmd}` })
+    
+    const buildProcess = spawn('cmake', ['--build', 'build', '--config', 'Release', '-j4'], {
+      cwd: projectDir
+    })
 
-    console.log('Build output:', stdout)
-    if (stderr) console.log('Build stderr:', stderr)
+    buildProcess.stdout.on('data', (data) => {
+      const text = data.toString().trim()
+      if (text) sendEvent('log', { message: text })
+    })
+
+    buildProcess.stderr.on('data', (data) => {
+      const text = data.toString().trim()
+      if (text) sendEvent('log', { message: text })
+    })
+
+    await new Promise((resolve, reject) => {
+      buildProcess.on('close', (code) => {
+        if (code === 0) resolve()
+        else reject(new Error(`Build failed with code ${code}`))
+      })
+    })
 
     // Find the VST3 output
     const artefactsDir = path.join(projectDir, 'build', `${projectName}_artefacts`, 'Release', 'VST3')
@@ -494,20 +542,17 @@ app.post('/api/compile', async (req, res) => {
       await fs.access(altPath)
     }
 
-    await appendLog(projectDir, { type: 'complete', message: 'Compilation successful!' })
-
-    res.json({
-      success: true,
-      output: 'Build completed successfully',
+    sendEvent('complete', { 
+      message: 'Compilation successful!',
       downloadUrl: `/api/download/${projectName}`
     })
 
+    res.end()
+
   } catch (error) {
     console.error('Compile error:', error)
-    await appendLog(projectDir, { type: 'error', message: `Compilation failed: ${error.message}` })
-    res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Compilation failed'
-    })
+    sendEvent('error', { message: error instanceof Error ? error.message : 'Compilation failed' })
+    res.end()
   }
 })
 
@@ -742,6 +787,20 @@ app.post('/api/projects/:projectName/rename', async (req, res) => {
   } catch (error) {
     console.error('Rename error:', error)
     res.status(500).json({ error: 'Failed to rename project' })
+  }
+})
+
+// Delete project
+app.delete('/api/projects/:projectName', async (req, res) => {
+  const { projectName } = req.params
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+
+  try {
+    await fs.rm(projectDir, { recursive: true, force: true })
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Delete error:', error)
+    res.status(500).json({ error: 'Failed to delete project' })
   }
 })
 
