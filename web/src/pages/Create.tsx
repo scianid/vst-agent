@@ -8,6 +8,12 @@ import { IdeLayout, LogEntry } from '@/components/IdeLayout'
 
 type BuildStatus = 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
 
+interface Project {
+  name: string
+  modified: string
+  created: string
+}
+
 interface FileNode {
   name: string
   path: string
@@ -31,7 +37,7 @@ export function Create() {
   const [showSettings, setShowSettings] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
-  const [recentProjects, setRecentProjects] = useState<string[]>([])
+  const [recentProjects, setRecentProjects] = useState<Project[]>([])
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Check for API key on mount
@@ -675,16 +681,16 @@ export function Create() {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {recentProjects.map((project) => (
                 <button
-                  key={project}
-                  onClick={() => handleLoadProject(project)}
+                  key={project.name}
+                  onClick={() => handleLoadProject(project.name)}
                   className="group flex flex-col items-start p-4 bg-bg-secondary/50 hover:bg-bg-secondary border border-border hover:border-accent/50 rounded-xl transition-all text-left"
                 >
                   <div className="flex items-center gap-2 mb-2 text-text-primary group-hover:text-accent transition-colors">
                     <Folder className="w-4 h-4" />
-                    <span className="font-medium truncate w-full">{project}</span>
+                    <span className="font-medium truncate w-full">{project.name}</span>
                   </div>
                   <div className="text-xs text-text-tertiary">
-                    Click to open
+                    Last modified: {new Date(project.modified).toLocaleDateString()}
                   </div>
                 </button>
               ))}
