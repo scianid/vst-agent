@@ -141,6 +141,15 @@ export function IdeLayout({
     return 'plaintext'
   }
 
+  const handleFixError = () => {
+    const recentLogs = logs
+      .slice(-100)
+      .map(l => l.message)
+      .join('\n')
+    
+    onSendPrompt(`The compilation failed. Please analyze the logs and fix the issue.\n\nLogs:\n${recentLogs}`)
+  }
+
   // Filter logs for chat view
   const chatMessages = logs.filter(log => 
     log.type === 'user_prompt' || 
@@ -148,6 +157,58 @@ export function IdeLayout({
     log.type === 'complete' ||
     log.type === 'error'
   )
+
+  const ChatBubble = ({ msg, onFixError }: { msg: LogEntry, onFixError: () => void }) => {
+    const [isExpanded, setIsExpanded] = useState(false)
+    const isLong = msg.message.length > 500 || msg.message.split('\n').length > 10
+    
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`flex flex-col ${msg.type === 'user_prompt' ? 'items-end' : 'items-start'}`}
+      >
+        <div 
+          className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap shadow-sm ${
+            msg.type === 'user_prompt' 
+              ? 'bg-accent text-white rounded-br-none' 
+              : msg.type === 'error' 
+                ? 'bg-red-500/10 text-red-400 border border-red-500/20 rounded-bl-none'
+                : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
+          }`}
+        >
+          <div className={!isExpanded && isLong ? "max-h-60 overflow-hidden relative" : ""}>
+             {msg.message}
+             {!isExpanded && isLong && (
+               <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-black/20 to-transparent" />
+             )}
+          </div>
+          
+          {isLong && (
+            <button 
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-xs opacity-70 hover:opacity-100 mt-2 font-medium underline decoration-dotted"
+            >
+              {isExpanded ? "Show less" : "Show more"}
+            </button>
+          )}
+
+          {msg.type === 'error' && (
+            <button
+              onClick={onFixError}
+              className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-xs font-medium text-red-200 transition-colors w-fit"
+            >
+              <Sparkles className="w-3 h-3" />
+              Fix It
+            </button>
+          )}
+        </div>
+        <span className="text-[10px] text-text-tertiary mt-1.5 px-1">
+          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </motion.div>
+    )
+  }
 
   // File Tree Component
   const FileTreeNode = ({ node, depth = 0 }: { node: FileNode; depth?: number }) => {
@@ -452,27 +513,7 @@ export function IdeLayout({
                     </div>
                   )}
                   {chatMessages.map((msg, i) => (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      key={i} 
-                      className={`flex flex-col ${msg.type === 'user_prompt' ? 'items-end' : 'items-start'}`}
-                    >
-                      <div 
-                        className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap shadow-sm ${
-                          msg.type === 'user_prompt' 
-                            ? 'bg-accent text-white rounded-br-none' 
-                            : msg.type === 'error' 
-                              ? 'bg-red-500/10 text-red-400 border border-red-500/20 rounded-bl-none'
-                              : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
-                        }`}
-                      >
-                        {msg.message}
-                      </div>
-                      <span className="text-[10px] text-text-tertiary mt-1.5 px-1">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </motion.div>
+                    <ChatBubble key={i} msg={msg} onFixError={handleFixError} />
                   ))}
                   {isWorking && (
                     <div className="ml-2 self-start max-w-[90%] space-y-2">
