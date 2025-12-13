@@ -39,7 +39,7 @@ export function Create() {
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Project[]>([])
-  const [platform, setPlatform] = useState<'linux' | 'windows'>('linux')
+  const [platform, setPlatform] = useState<'linux' | 'windows'>('windows')
   const logsEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -427,17 +427,22 @@ export function Create() {
     }
   }
 
-  const handleCompile = async () => {
+  const handleCompile = async (platformOverride?: 'linux' | 'windows') => {
     if (!projectName) return
 
+    const targetPlatform = platformOverride || platform
+    if (platformOverride && platformOverride !== platform) {
+      setPlatform(platformOverride)
+    }
+
     setStatus('compiling')
-    addLog('Starting compilation...', 'info')
+    addLog(`Starting compilation for ${targetPlatform}...`, 'info')
     
     try {
       const response = await fetch('/api/compile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName, platform })
+        body: JSON.stringify({ projectName, platform: targetPlatform })
       })
 
       if (!response.ok) {
@@ -474,7 +479,7 @@ export function Create() {
                   setDownloadUrl(data.downloadUrl)
                   setDownloads(prev => ({
                     ...prev,
-                    [platform]: data.downloadUrl
+                    [targetPlatform]: data.downloadUrl
                   }))
                   setStatus('compiled')
                   break

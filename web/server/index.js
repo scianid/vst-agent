@@ -524,16 +524,41 @@ app.post('/api/compile', async (req, res) => {
       ]
 
       // Configure host
+      sendEvent('log', { message: 'Configuring host tools...' })
       const hostConfigProcess = spawn('cmake', hostArgs, { cwd: projectDir })
+      
+      hostConfigProcess.stdout.on('data', (data) => {
+        // console.log(`[Host Config] ${data}`) 
+      })
+      hostConfigProcess.stderr.on('data', (data) => {
+        console.log(`[Host Config Err] ${data}`)
+      })
+
       await new Promise((resolve, reject) => {
         hostConfigProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host config failed: ${code}`)))
       })
 
       // Build juceaide
+      // Note: In some JUCE versions, juceaide is built during configure time.
+      // We try to build it, but if it fails, we check if it exists anyway.
+      sendEvent('log', { message: 'Building host tools...' })
       const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir, '--target', 'juceaide'], { cwd: projectDir })
-      await new Promise((resolve, reject) => {
-        hostBuildProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host build failed: ${code}`)))
+      
+      hostBuildProcess.stdout.on('data', (data) => {
+        // console.log(`[Host Build] ${data}`)
       })
+      hostBuildProcess.stderr.on('data', (data) => {
+        console.log(`[Host Build Err] ${data}`)
+      })
+
+      try {
+        await new Promise((resolve, reject) => {
+          hostBuildProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host build failed: ${code}`)))
+        })
+      } catch (e) {
+        console.log('Host build step failed, checking if binary exists anyway...')
+        sendEvent('log', { message: 'Host build step failed, checking if binary exists anyway...' })
+      }
 
       // Find juceaide
       // It's usually in build_host/juceaide_artefacts/Release/juceaide or similar
@@ -545,7 +570,10 @@ app.post('/api/compile', async (req, res) => {
           path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'Release', 'juceaide'),
           path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'juceaide'), // if not multi-config
           path.join(projectDir, hostBuildDir, 'bin', 'juceaide'),
-          path.join(projectDir, hostBuildDir, 'juceaide')
+          path.join(projectDir, hostBuildDir, 'juceaide'),
+          // Deeply nested locations found in some setups
+          path.join(projectDir, hostBuildDir, 'JUCE', 'tools', 'extras', 'Build', 'juceaide', 'juceaide_artefacts', 'Debug', 'juceaide'),
+          path.join(projectDir, hostBuildDir, 'JUCE', 'tools', 'extras', 'Build', 'juceaide', 'juceaide_artefacts', 'Release', 'juceaide')
         ]
         
         for (const p of candidates) {

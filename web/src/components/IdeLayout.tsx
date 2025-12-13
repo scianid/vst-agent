@@ -36,7 +36,7 @@ interface IdeLayoutProps {
   isWorking: boolean
   platform: 'linux' | 'windows'
   onPlatformChange: (platform: 'linux' | 'windows') => void
-  onCompile: () => void
+  onCompile: (platform?: 'linux' | 'windows') => void
   onSelectFile: (path: string) => void
   onSendPrompt: (prompt: string) => void
   onBack: () => void
@@ -65,16 +65,21 @@ export function IdeLayout({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['Source', 'Source/DSP', 'Source/GUI']))
   const [copied, setCopied] = useState(false)
   const [showDownloadMenu, setShowDownloadMenu] = useState(false)
+  const [showCompileMenu, setShowCompileMenu] = useState(false)
   
   const chatEndRef = useRef<HTMLDivElement>(null)
   const consoleEndRef = useRef<HTMLDivElement>(null)
   const downloadMenuRef = useRef<HTMLDivElement>(null)
+  const compileMenuRef = useRef<HTMLDivElement>(null)
 
-  // Close download menu when clicking outside
+  // Close menus when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
         setShowDownloadMenu(false)
+      }
+      if (compileMenuRef.current && !compileMenuRef.current.contains(event.target as Node)) {
+        setShowCompileMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -192,24 +197,42 @@ export function IdeLayout({
         </div>
 
         <div className="flex items-center gap-2">
-          <select
-            value={platform}
-            onChange={(e) => onPlatformChange(e.target.value as 'linux' | 'windows')}
-            className="bg-bg-tertiary border border-border rounded-md text-sm px-2 py-2 text-text-secondary focus:outline-none focus:border-accent"
-            disabled={isWorking}
-          >
-            <option value="linux">Linux</option>
-            <option value="windows">Windows</option>
-          </select>
-
-          <button
-            onClick={onCompile}
-            disabled={isWorking}
-            className="flex items-center gap-2 px-4 py-2 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {status === 'compiling' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Compile
-          </button>
+          <div className="relative" ref={compileMenuRef}>
+            <button
+              onClick={() => setShowCompileMenu(!showCompileMenu)}
+              disabled={isWorking}
+              className="flex items-center gap-2 px-4 py-2 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {status === 'compiling' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              Compile
+              <ChevronDown className={`w-3 h-3 transition-transform ${showCompileMenu ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showCompileMenu && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-bg-secondary border border-border rounded-lg shadow-xl overflow-hidden z-50">
+                <button
+                  onClick={() => {
+                    onCompile('windows')
+                    setShowCompileMenu(false)
+                  }}
+                  className="flex items-center gap-2 px-4 py-3 hover:bg-bg-tertiary text-sm text-text-primary transition-colors w-full text-left"
+                >
+                  <span className="w-4">🪟</span>
+                  Windows (Default)
+                </button>
+                <button
+                  onClick={() => {
+                    onCompile('linux')
+                    setShowCompileMenu(false)
+                  }}
+                  className="flex items-center gap-2 px-4 py-3 hover:bg-bg-tertiary text-sm text-text-primary transition-colors w-full text-left border-t border-border/50"
+                >
+                  <span className="w-4">🐧</span>
+                  Linux
+                </button>
+              </div>
+            )}
+          </div>
           
           {(downloads.linux || downloads.windows) && (
             <div className="relative" ref={downloadMenuRef}>
