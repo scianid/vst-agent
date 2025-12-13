@@ -32,7 +32,7 @@ interface IdeLayoutProps {
   fileContent: string
   logs: LogEntry[]
   status: 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
-  downloadUrl: string
+  downloads: { linux: string | null, windows: string | null }
   isWorking: boolean
   platform: 'linux' | 'windows'
   onPlatformChange: (platform: 'linux' | 'windows') => void
@@ -50,7 +50,7 @@ export function IdeLayout({
   fileContent,
   logs,
   status,
-  downloadUrl,
+  downloads,
   isWorking,
   platform,
   onPlatformChange,
@@ -64,9 +64,24 @@ export function IdeLayout({
   const [prompt, setPrompt] = useState('')
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['Source', 'Source/DSP', 'Source/GUI']))
   const [copied, setCopied] = useState(false)
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false)
   
   const chatEndRef = useRef<HTMLDivElement>(null)
   const consoleEndRef = useRef<HTMLDivElement>(null)
+  const downloadMenuRef = useRef<HTMLDivElement>(null)
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
+        setShowDownloadMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
 
   // Auto-scroll
   useEffect(() => {
@@ -196,15 +211,53 @@ export function IdeLayout({
             Compile
           </button>
           
-          {downloadUrl && (
-            <a
-              href={downloadUrl}
-              download
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              Download {platform === 'windows' ? 'Windows' : 'Linux'}
-            </a>
+          {(downloads.linux || downloads.windows) && (
+            <div className="relative" ref={downloadMenuRef}>
+              <button
+                onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Download
+                <ChevronDown className={`w-3 h-3 transition-transform ${showDownloadMenu ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showDownloadMenu && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-bg-secondary border border-border rounded-lg shadow-xl overflow-hidden z-50">
+                  {downloads.linux ? (
+                    <a
+                      href={downloads.linux}
+                      download
+                      className="flex items-center gap-2 px-4 py-3 hover:bg-bg-tertiary text-sm text-text-primary transition-colors w-full text-left"
+                      onClick={() => setShowDownloadMenu(false)}
+                    >
+                      <Download className="w-4 h-4" />
+                      Linux VST3
+                    </a>
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-text-tertiary italic border-b border-border/50">
+                      Linux not compiled
+                    </div>
+                  )}
+                  
+                  {downloads.windows ? (
+                    <a
+                      href={downloads.windows}
+                      download
+                      className="flex items-center gap-2 px-4 py-3 hover:bg-bg-tertiary text-sm text-text-primary transition-colors w-full text-left border-t border-border/50"
+                      onClick={() => setShowDownloadMenu(false)}
+                    >
+                      <Download className="w-4 h-4" />
+                      Windows VST3
+                    </a>
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-text-tertiary italic border-t border-border/50">
+                      Windows not compiled
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>

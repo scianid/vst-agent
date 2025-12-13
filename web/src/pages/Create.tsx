@@ -519,7 +519,7 @@ export function Create() {
           fileContent={fileContent}
           logs={logs}
           status={status}
-          downloadUrl={downloadUrl}
+          downloads={downloads}
           isWorking={isWorking}
           platform={platform}
           onPlatformChange={handlePlatformChange}
