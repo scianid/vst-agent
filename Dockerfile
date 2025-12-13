@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Utilities
     zip \
     unzip \
+    # Configure MinGW to use POSIX threading model (required for std::mutex in JUCE)
+    && update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix \
+    && update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix \
     # Set GCC 12 as default
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
