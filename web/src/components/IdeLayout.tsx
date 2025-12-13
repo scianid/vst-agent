@@ -582,7 +582,7 @@ export function IdeLayout({
                         className="flex items-center gap-3 text-text-tertiary text-xs bg-white/5 px-4 py-2 rounded-full w-fit"
                       >
                         <Loader2 className="w-3 h-3 animate-spin text-accent" />
-                        <span>{status === 'compiling' ? 'Compiling...' : 'Claude is thinking...'}</span>
+                        <span>{status === 'compiling' ? 'Compiling (May take a while...)' : 'AI is thinking...'}</span>
                       </motion.div>
                       
                       <motion.div
