@@ -539,11 +539,10 @@ app.post('/api/compile', async (req, res) => {
         hostConfigProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host config failed: ${code}`)))
       })
 
-      // Build juceaide
-      // Note: In some JUCE versions, juceaide is built during configure time.
-      // We try to build it, but if it fails, we check if it exists anyway.
+      // Build host tools (building the main project will trigger juceaide build)
       sendEvent('log', { message: 'Building host tools...' })
-      const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir, '--target', 'juceaide'], { cwd: projectDir })
+      // We build the default target which ensures dependencies like juceaide are built
+      const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir], { cwd: projectDir })
       
       hostBuildProcess.stdout.on('data', (data) => {
         // console.log(`[Host Build] ${data}`)
@@ -617,26 +616,40 @@ app.post('/api/compile', async (req, res) => {
       cmakeArgs.push(
         '-DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/target/toolchain.cmake',
         '-DCMAKE_OSX_ARCHITECTURES=x86_64',
-        '-DJUCE_BUILD_HELPER_TOOLS=OFF'
+        '-DJUCE_BUILD_HELPER_TOOLS=OFF',
+        '-DCMAKE_OSX_SYSROOT=/opt/osxcross/target/SDK/MacOSX11.3.sdk'
       )
     }
 
     const configureCmd = `cmake ${cmakeArgs.join(' ')}`
     sendEvent('log', { message: `Running: ${configureCmd}` })
     
+    // Prepare environment for cross-compilation
+    const env = { ...process.env }
+    if (platform === 'mac') {
+      env.OSXCROSS_ROOT = '/opt/osxcross/target'
+      env.OSXCROSS_HOST = 'x86_64-apple-darwin20.4'
+      env.OSXCROSS_TARGET_DIR = '/opt/osxcross/target'
+      env.OSXCROSS_TARGET = 'darwin20.4'
+      env.OSXCROSS_SDK = '/opt/osxcross/target/SDK/MacOSX11.3.sdk'
+    }
+
     const runConfigure = () => new Promise((resolve, reject) => {
       const configProcess = spawn('cmake', cmakeArgs, {
-        cwd: projectDir
+        cwd: projectDir,
+        env
       })
 
       configProcess.stdout.on('data', (data) => {
         const text = data.toString().trim()
         if (text) sendEvent('log', { message: text })
+        console.log(`[CMake] ${text}`)
       })
 
       configProcess.stderr.on('data', (data) => {
         const text = data.toString().trim()
         if (text) sendEvent('log', { message: text })
+        console.log(`[CMake Err] ${text}`)
       })
 
       configProcess.on('close', (code) => {
@@ -667,7 +680,8 @@ app.post('/api/compile', async (req, res) => {
     sendEvent('log', { message: `Running: ${buildCmd}` })
     
     const buildProcess = spawn('cmake', ['--build', buildDirName, '--config', 'Release', '-j4'], {
-      cwd: projectDir
+      cwd: projectDir,
+      env
     })
 
     buildProcess.stdout.on('data', (data) => {
