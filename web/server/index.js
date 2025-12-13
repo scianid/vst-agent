@@ -474,13 +474,14 @@ Generate all the source files in the Source/ directory. Make sure the code is co
 
 // Compile the plugin (streaming)
 app.post('/api/compile', async (req, res) => {
-  const { projectName } = req.body
+  const { projectName, platform = 'linux' } = req.body
 
   if (!projectName) {
     return res.status(400).json({ error: 'Missing project name' })
   }
 
   const projectDir = path.join(PLUGINS_DIR, projectName)
+  const buildDirName = `build_${platform}`
 
   // Setup SSE
   res.setHeader('Content-Type', 'text/event-stream')
@@ -499,39 +500,133 @@ app.post('/api/compile', async (req, res) => {
     // Check if project exists
     await fs.access(projectDir)
 
-    console.log(`Compiling: ${projectName}`)
-    sendEvent('log', { message: 'Starting compilation...' })
+    console.log(`Compiling: ${projectName} for ${platform}`)
+    sendEvent('log', { message: `Starting compilation for ${platform}...` })
 
     // Configure with CMake
-    const configureCmd = `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/JUCE`
+    const cmakeArgs = [
+      '-B', buildDirName,
+      '-G', 'Ninja',
+      '-DCMAKE_BUILD_TYPE=Release',
+      '-DCMAKE_PREFIX_PATH=/opt/JUCE'
+    ]
+
+    if (platform === 'windows') {
+      // For Windows cross-compilation, we first need to build juceaide for the host (Linux)
+      sendEvent('log', { message: 'Building host tools (juceaide) for cross-compilation...' })
+      
+      const hostBuildDir = 'build_host'
+      const hostArgs = [
+        '-B', hostBuildDir,
+        '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_PREFIX_PATH=/opt/JUCE'
+      ]
+
+      // Configure host
+      const hostConfigProcess = spawn('cmake', hostArgs, { cwd: projectDir })
+      await new Promise((resolve, reject) => {
+        hostConfigProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host config failed: ${code}`)))
+      })
+
+      // Build juceaide
+      const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir, '--target', 'juceaide'], { cwd: projectDir })
+      await new Promise((resolve, reject) => {
+        hostBuildProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host build failed: ${code}`)))
+      })
+
+      // Find juceaide
+      // It's usually in build_host/juceaide_artefacts/Release/juceaide or similar
+      // We'll try to find it
+      let juceaidePath = ''
+      try {
+        // Common locations
+        const candidates = [
+          path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'Release', 'juceaide'),
+          path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'juceaide'), // if not multi-config
+          path.join(projectDir, hostBuildDir, 'bin', 'juceaide'),
+          path.join(projectDir, hostBuildDir, 'juceaide')
+        ]
+        
+        for (const p of candidates) {
+          try {
+            await fs.access(p)
+            juceaidePath = p
+            break
+          } catch {}
+        }
+        
+        if (!juceaidePath) {
+           // Try to find it with find command as fallback
+           const { stdout } = await execAsync(`find ${path.join(projectDir, hostBuildDir)} -name juceaide -type f -executable | head -n 1`)
+           juceaidePath = stdout.trim()
+        }
+      } catch (e) {
+        console.error('Error finding juceaide:', e)
+      }
+
+      if (juceaidePath) {
+        sendEvent('log', { message: `Found juceaide at: ${juceaidePath}` })
+        cmakeArgs.push(`-DJUCE_TOOL_JUCEAIDE=${juceaidePath}`)
+      } else {
+        sendEvent('log', { message: 'Warning: Could not find juceaide. Cross-compilation might fail.' })
+      }
+
+      cmakeArgs.push(
+        '-DCMAKE_SYSTEM_NAME=Windows',
+        '-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc',
+        '-DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++',
+        '-DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres',
+        '-DJUCE_BUILD_HELPER_TOOLS=OFF' // Disable helper tools for cross-compilation
+      )
+    }
+
+    const configureCmd = `cmake ${cmakeArgs.join(' ')}`
     sendEvent('log', { message: `Running: ${configureCmd}` })
     
-    const configProcess = spawn('cmake', ['-B', 'build', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_PREFIX_PATH=/opt/JUCE'], {
-      cwd: projectDir
-    })
+    const runConfigure = () => new Promise((resolve, reject) => {
+      const configProcess = spawn('cmake', cmakeArgs, {
+        cwd: projectDir
+      })
 
-    configProcess.stdout.on('data', (data) => {
-      const text = data.toString().trim()
-      if (text) sendEvent('log', { message: text })
-    })
+      configProcess.stdout.on('data', (data) => {
+        const text = data.toString().trim()
+        if (text) sendEvent('log', { message: text })
+      })
 
-    configProcess.stderr.on('data', (data) => {
-      const text = data.toString().trim()
-      if (text) sendEvent('log', { message: text })
-    })
+      configProcess.stderr.on('data', (data) => {
+        const text = data.toString().trim()
+        if (text) sendEvent('log', { message: text })
+      })
 
-    await new Promise((resolve, reject) => {
       configProcess.on('close', (code) => {
         if (code === 0) resolve()
         else reject(new Error(`CMake configure failed with code ${code}`))
       })
     })
 
+    try {
+      await runConfigure()
+    } catch (err) {
+      console.log('Configure failed, trying to clean cache...')
+      sendEvent('log', { message: 'Configuration failed. Cleaning cache and retrying...' })
+      
+      try {
+        await fs.rm(path.join(projectDir, buildDirName, 'CMakeCache.txt'), { force: true })
+        await fs.rm(path.join(projectDir, buildDirName, 'CMakeFiles'), { recursive: true, force: true })
+      } catch (e) {
+        console.error('Failed to clean cache:', e)
+      }
+      
+      // Retry once
+      await runConfigure()
+    }
+
     // Build
-    const buildCmd = `cmake --build build --config Release -j$(nproc)`
+    const buildCmd = `cmake --build ${buildDirName} --config Release -j$(nproc)`
     sendEvent('log', { message: `Running: ${buildCmd}` })
     
-    const buildProcess = spawn('cmake', ['--build', 'build', '--config', 'Release', '-j4'], {
+    const buildProcess = spawn('cmake', ['--build', buildDirName, '--config', 'Release', '-j4'], {
       cwd: projectDir
     })
 
@@ -553,21 +648,28 @@ app.post('/api/compile', async (req, res) => {
     })
 
     // Find the VST3 output
-    const artefactsDir = path.join(projectDir, 'build', `${projectName}_artefacts`, 'Release', 'VST3')
-    const vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
+    // For Windows, it might be in a different path structure or just the VST3 bundle
+    const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
+    let vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
 
     // Check if VST3 was created
     try {
       await fs.access(vst3Path)
     } catch {
       // Try alternative path
-      const altPath = path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3')
-      await fs.access(altPath)
+      const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3')
+      try {
+        await fs.access(path.join(altPath, `${projectName}.vst3`))
+        vst3Path = path.join(altPath, `${projectName}.vst3`)
+      } catch {
+         // For Windows, sometimes it's just the file in the Release folder?
+         // But JUCE usually creates the bundle structure.
+      }
     }
 
     sendEvent('complete', { 
       message: 'Compilation successful!',
-      downloadUrl: `/api/download/${projectName}`
+      downloadUrl: `/api/download/${projectName}?platform=${platform}`
     })
 
     res.end()
@@ -582,13 +684,16 @@ app.post('/api/compile', async (req, res) => {
 // Download the compiled VST3
 app.get('/api/download/:projectName', async (req, res) => {
   const { projectName } = req.params
+  const { platform = 'linux' } = req.query
   const projectDir = path.join(PLUGINS_DIR, projectName)
+  const buildDirName = `build_${platform}`
 
   try {
-    // Target path as requested: MyPlugins/[PROJECTNAME]/build/[PROJECTNAME]_artefacts/Release/VST3/[PROJECTNAME].vst3
-    const vst3Path = path.join(projectDir, 'build', `${projectName}_artefacts`, 'Release', 'VST3', `${projectName}.vst3`)
+    // Target path as requested: MyPlugins/[PROJECTNAME]/build_[platform]/[PROJECTNAME]_artefacts/Release/VST3/[PROJECTNAME].vst3
+    const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
+    let vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
     
-    console.log(`[Download] Request for ${projectName}`)
+    console.log(`[Download] Request for ${projectName} (${platform})`)
     console.log(`[Download] Looking for VST3 at: ${vst3Path}`)
 
     try {
@@ -596,40 +701,26 @@ app.get('/api/download/:projectName', async (req, res) => {
     } catch (e) {
       console.error(`[Download] VST3 not found at ${vst3Path}`)
       
-      // Fallback: Try without 'Release' just in case (some CMake configs might differ)
-      const altPath = path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
+      // Fallback: Try without 'Release' just in case
+      const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
       try {
         await fs.access(altPath)
         console.log(`[Download] Found at alternative path: ${altPath}`)
-        // If found at alt path, use it? 
-        // The user specifically asked for the Release path, but if it's not there, better to give something than nothing?
-        // But let's stick to the requested path as primary.
-        // For now, I'll return 404 if not found in Release to be strict as per user request, 
-        // OR I can just use the alt path if found. 
-        // I'll use the alt path but log it.
-        // actually, let's just use the one found.
-        // But wait, I need to update vst3Path variable.
-        // Let's rewrite this block.
+        vst3Path = altPath
       } catch {
         return res.status(404).json({ error: 'VST3 not found. Please try compiling again.' })
       }
     }
 
-    // We need to determine which path actually exists to zip it
-    let finalPath = vst3Path
-    try {
-      await fs.access(finalPath)
-    } catch {
-      finalPath = path.join(projectDir, 'build', `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
-    }
-
     // Create a zip of the VST3 bundle
-    const zipPath = path.join(projectDir, `${projectName}.vst3.zip`)
-    console.log(`[Download] Zipping ${finalPath} to ${zipPath}`)
+    const zipPath = path.join(projectDir, `${projectName}_${platform}.vst3.zip`)
+    console.log(`[Download] Zipping ${vst3Path} to ${zipPath}`)
     
-    await execAsync(`cd "${path.dirname(finalPath)}" && zip -r "${zipPath}" "${projectName}.vst3"`)
+    // For Windows, if it's a folder, zip it. If it's a file (unlikely for VST3 but possible with MinGW), zip it.
+    // VST3 is usually a bundle (folder).
+    await execAsync(`cd "${path.dirname(vst3Path)}" && zip -r "${zipPath}" "${path.basename(vst3Path)}"`)
 
-    res.download(zipPath, `${projectName}.vst3.zip`)
+    res.download(zipPath, `${projectName}_${platform}.vst3.zip`)
 
   } catch (error) {
     console.error('Download error:', error)
@@ -1067,6 +1158,41 @@ app.get('/api/projects/:projectName/prompt', async (req, res) => {
     }
     console.error('Read prompt error:', e)
     res.status(500).json({ error: 'Failed to read prompt' })
+  }
+})
+
+// Check build status
+app.get('/api/projects/:projectName/build-status', async (req, res) => {
+  const { projectName } = req.params
+  const { platform = 'linux' } = req.query
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const buildDirName = `build_${platform}`
+  
+  try {
+    // Check for VST3
+    const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
+    const vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
+    const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
+    
+    let exists = false
+    try {
+      await fs.access(vst3Path)
+      exists = true
+    } catch {
+      try {
+        await fs.access(altPath)
+        exists = true
+      } catch {}
+    }
+    
+    res.json({ 
+      success: true, 
+      compiled: exists,
+      downloadUrl: exists ? `/api/download/${projectName}?platform=${platform}` : null
+    })
+  } catch (error) {
+    console.error('Build status check error:', error)
+    res.status(500).json({ error: 'Failed to check build status' })
   }
 })
 

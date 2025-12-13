@@ -28,6 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     # Package config
     pkg-config \
+    # Cross-compilation for Windows
+    mingw-w64 \
+    # Utilities
+    zip \
+    unzip \
     # Set GCC 12 as default
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \

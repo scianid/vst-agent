@@ -34,6 +34,8 @@ interface IdeLayoutProps {
   status: 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
   downloadUrl: string
   isWorking: boolean
+  platform: 'linux' | 'windows'
+  onPlatformChange: (platform: 'linux' | 'windows') => void
   onCompile: () => void
   onSelectFile: (path: string) => void
   onSendPrompt: (prompt: string) => void
@@ -50,6 +52,8 @@ export function IdeLayout({
   status,
   downloadUrl,
   isWorking,
+  platform,
+  onPlatformChange,
   onCompile,
   onSelectFile,
   onSendPrompt,
@@ -173,6 +177,16 @@ export function IdeLayout({
         </div>
 
         <div className="flex items-center gap-2">
+          <select
+            value={platform}
+            onChange={(e) => onPlatformChange(e.target.value as 'linux' | 'windows')}
+            className="bg-bg-tertiary border border-border rounded-md text-sm px-2 py-2 text-text-secondary focus:outline-none focus:border-accent"
+            disabled={isWorking}
+          >
+            <option value="linux">Linux</option>
+            <option value="windows">Windows</option>
+          </select>
+
           <button
             onClick={onCompile}
             disabled={isWorking}
@@ -189,7 +203,7 @@ export function IdeLayout({
               className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors"
             >
               <Download className="w-4 h-4" />
-              Download
+              Download {platform === 'windows' ? 'Windows' : 'Linux'}
             </a>
           )}
         </div>
@@ -262,7 +276,13 @@ export function IdeLayout({
                   {isWorking && (
                     <div className="flex items-center gap-2 text-text-tertiary text-xs ml-2">
                       <Loader2 className="w-3 h-3 animate-spin" />
-                      Claude is thinking...
+                      <span>{status === 'compiling' ? 'Working...' : 'Claude is thinking...'}</span>
+                      <button 
+                        onClick={() => setActiveTab('console')}
+                        className="ml-2 underline hover:text-text-primary"
+                      >
+                        View Logs
+                      </button>
                     </div>
                   )}
                   <div ref={chatEndRef} />

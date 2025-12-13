@@ -31,6 +31,7 @@ export function Create() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [, setError] = useState('')
   const [downloadUrl, setDownloadUrl] = useState('')
+  const [downloads, setDownloads] = useState<{ linux: string | null, windows: string | null }>({ linux: null, windows: null })
   const [fileTree, setFileTree] = useState<FileNode[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
@@ -38,6 +39,7 @@ export function Create() {
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Project[]>([])
+  const [platform, setPlatform] = useState<'linux' | 'windows'>('linux')
   const logsEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -127,6 +129,38 @@ export function Create() {
 
     // Trigger file tree fetch
     fetchFileTree(name)
+    // Check if already compiled for current platform
+    checkBuildStatus(name)
+  }
+
+  const checkBuildStatus = async (name: string) => {
+    try {
+      // Check Linux
+      const resLinux = await fetch(`/api/projects/${name}/build-status?platform=linux`)
+      const dataLinux = await resLinux.json()
+      
+      // Check Windows
+      const resWin = await fetch(`/api/projects/${name}/build-status?platform=windows`)
+      const dataWin = await resWin.json()
+
+      setDownloads({
+        linux: dataLinux.compiled ? dataLinux.downloadUrl : null,
+        windows: dataWin.compiled ? dataWin.downloadUrl : null
+      })
+      
+      // Update status if currently selected platform is compiled
+      if ((platform === 'linux' && dataLinux.compiled) || (platform === 'windows' && dataWin.compiled)) {
+         setStatus('compiled')
+      } else {
+         // If we are just checking status on load/switch, and it's not compiled, 
+         // we should probably keep it as 'generated' (since code exists) or 'idle' if no code?
+         // But loadProjectData sets it to 'generated'.
+         // If we switch platform and it's not compiled, it should be 'generated' (ready to compile).
+         if (status === 'compiled') setStatus('generated') 
+      }
+    } catch (err) {
+      console.error('Failed to check build status:', err)
+    }
   }
 
   const handleResetState = () => {
@@ -135,6 +169,7 @@ export function Create() {
     setLogs([])
     setError('')
     setDownloadUrl('')
+    setDownloads({ linux: null, windows: null })
     setPrompt('')
     setFileTree([])
     setSelectedFile(null)
@@ -379,6 +414,19 @@ export function Create() {
     }
   }
 
+  const handlePlatformChange = (newPlatform: 'linux' | 'windows') => {
+    setPlatform(newPlatform)
+    // Check if compiled for new platform
+    if (projectName) {
+      // We already have the downloads state, just update status
+      if (downloads[newPlatform]) {
+        setStatus('compiled')
+      } else {
+        setStatus('generated')
+      }
+    }
+  }
+
   const handleCompile = async () => {
     if (!projectName) return
 
@@ -389,7 +437,7 @@ export function Create() {
       const response = await fetch('/api/compile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName })
+        body: JSON.stringify({ projectName, platform })
       })
 
       if (!response.ok) {
@@ -424,6 +472,10 @@ export function Create() {
                 case 'complete':
                   addLog(data.message, 'success')
                   setDownloadUrl(data.downloadUrl)
+                  setDownloads(prev => ({
+                    ...prev,
+                    [platform]: data.downloadUrl
+                  }))
                   setStatus('compiled')
                   break
                 case 'error':
@@ -469,6 +521,8 @@ export function Create() {
           status={status}
           downloadUrl={downloadUrl}
           isWorking={isWorking}
+          platform={platform}
+          onPlatformChange={handlePlatformChange}
           onCompile={handleCompile}
           onSelectFile={fetchFileContent}
           onSendPrompt={handleSendPrompt}
