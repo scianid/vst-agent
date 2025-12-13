@@ -169,3 +169,8 @@ docker exec vibevst pkill -f vite; Start-Sleep -Seconds 2; docker exec -d vibevs
 RESTART DOCKER
 
 docker restart vibevst && docker logs vibevst --tail 50 -f
+
+
+Build & Push Docker
+
+ docker build -t scianid303/vibe-vst:latest . && 

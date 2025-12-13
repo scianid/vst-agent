@@ -42,6 +42,11 @@ project({project_name} VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set Windows version to Windows 10 to ensure modern APIs like SHGetKnownFolderPath are available
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_compile_definitions(_WIN32_WINNT=0x0A00 WINVER=0x0A00)
+endif()
+
 # Find JUCE
 find_package(JUCE CONFIG REQUIRED)
 
@@ -58,6 +63,7 @@ juce_add_plugin({project_name}
     PLUGIN_CODE {plugin_code}
     FORMATS VST3 Standalone
     PRODUCT_NAME "{display_name}"
+    VST3_AUTO_MANIFEST FALSE
 )
 
 # Generate JUCE header

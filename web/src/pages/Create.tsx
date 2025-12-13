@@ -4,7 +4,7 @@ import { ArrowRight, Sparkles, Check, Loader2, X, Settings, AlertCircle, FolderO
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { SettingsModal } from '@/components/ui/SettingsModal'
 import { ProjectListModal } from '@/components/ui/ProjectListModal'
-import { IdeLayout, LogEntry } from '@/components/IdeLayout'
+import { IdeLayout, LogEntry, DownloadLinks } from '@/components/IdeLayout'
 
 type BuildStatus = 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
 
@@ -31,7 +31,10 @@ export function Create() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [, setError] = useState('')
   const [downloadUrl, setDownloadUrl] = useState('')
-  const [downloads, setDownloads] = useState<{ linux: string | null, windows: string | null }>({ linux: null, windows: null })
+  const [downloads, setDownloads] = useState<{ linux: DownloadLinks, windows: DownloadLinks }>({ 
+    linux: { vst3: null, standalone: null }, 
+    windows: { vst3: null, standalone: null } 
+  })
   const [fileTree, setFileTree] = useState<FileNode[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
@@ -144,12 +147,19 @@ export function Create() {
       const dataWin = await resWin.json()
 
       setDownloads({
-        linux: dataLinux.compiled ? dataLinux.downloadUrl : null,
-        windows: dataWin.compiled ? dataWin.downloadUrl : null
+        linux: {
+          vst3: dataLinux.vst3Exists ? dataLinux.downloadUrl : null,
+          standalone: dataLinux.standaloneExists ? dataLinux.downloadStandaloneUrl : null
+        },
+        windows: {
+          vst3: dataWin.vst3Exists ? dataWin.downloadUrl : null,
+          standalone: dataWin.standaloneExists ? dataWin.downloadStandaloneUrl : null
+        }
       })
       
       // Update status if currently selected platform is compiled
-      if ((platform === 'linux' && dataLinux.compiled) || (platform === 'windows' && dataWin.compiled)) {
+      if ((platform === 'linux' && (dataLinux.vst3Exists || dataLinux.standaloneExists)) || 
+          (platform === 'windows' && (dataWin.vst3Exists || dataWin.standaloneExists))) {
          setStatus('compiled')
       } else {
          // If we are just checking status on load/switch, and it's not compiled, 
@@ -169,7 +179,10 @@ export function Create() {
     setLogs([])
     setError('')
     setDownloadUrl('')
-    setDownloads({ linux: null, windows: null })
+    setDownloads({ 
+      linux: { vst3: null, standalone: null }, 
+      windows: { vst3: null, standalone: null } 
+    })
     setPrompt('')
     setFileTree([])
     setSelectedFile(null)
@@ -419,7 +432,7 @@ export function Create() {
     // Check if compiled for new platform
     if (projectName) {
       // We already have the downloads state, just update status
-      if (downloads[newPlatform]) {
+      if (downloads[newPlatform].vst3 || downloads[newPlatform].standalone) {
         setStatus('compiled')
       } else {
         setStatus('generated')
@@ -479,7 +492,10 @@ export function Create() {
                   setDownloadUrl(data.downloadUrl)
                   setDownloads(prev => ({
                     ...prev,
-                    [targetPlatform]: data.downloadUrl
+                    [targetPlatform]: {
+                      vst3: data.downloadUrl,
+                      standalone: data.downloadStandaloneUrl || null
+                    }
                   }))
                   setStatus('compiled')
                   break

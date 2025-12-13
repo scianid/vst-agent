@@ -26,6 +26,11 @@ export interface LogEntry {
   lines?: number
 }
 
+export interface DownloadLinks {
+  vst3: string | null
+  standalone: string | null
+}
+
 interface IdeLayoutProps {
   projectName: string
   fileTree: FileNode[]
@@ -33,7 +38,7 @@ interface IdeLayoutProps {
   fileContent: string
   logs: LogEntry[]
   status: 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
-  downloads: { linux: string | null, windows: string | null }
+  downloads: { linux: DownloadLinks, windows: DownloadLinks }
   isWorking: boolean
   platform: 'linux' | 'windows'
   onPlatformChange: (platform: 'linux' | 'windows') => void
@@ -275,7 +280,7 @@ export function IdeLayout({
             </AnimatePresence>
           </div>
           
-          {(downloads.linux || downloads.windows) && (
+          {(status === 'compiled' || downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone) && (
             <div className="relative" ref={downloadMenuRef}>
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
@@ -293,42 +298,94 @@ export function IdeLayout({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     transition={{ duration: 0.1 }}
-                    className="absolute right-0 top-full mt-2 w-64 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-2 w-72 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
                   >
                     <div className="p-1">
-                      {downloads.linux ? (
+                      {/* Empty State */}
+                      {!(downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone) && (
+                        <div className="px-4 py-3 text-sm text-text-tertiary text-center">
+                          <div className="mb-1">No downloads found</div>
+                          <div className="text-xs opacity-50">Try compiling again</div>
+                        </div>
+                      )}
+
+                      {/* Linux Downloads */}
+                      {(downloads.linux.vst3 || downloads.linux.standalone) && (
+                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider">Linux</div>
+                      )}
+                      
+                      {downloads.linux.vst3 && (
                         <a
-                          href={downloads.linux}
+                          href={downloads.linux.vst3}
                           download
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
                           onClick={() => setShowDownloadMenu(false)}
                         >
                           <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400 group-hover:scale-110 transition-transform">
                             <Download className="w-4 h-4" />
                           </div>
                           <div>
-                            <div className="font-medium">Linux VST3</div>
-                            <div className="text-[10px] text-text-tertiary">Ready to install</div>
+                            <div className="font-medium">VST3 Plugin</div>
+                            <div className="text-[10px] text-text-tertiary">Linux VST3 Bundle</div>
                           </div>
                         </a>
-                      ) : null}
-                      
-                      {downloads.windows ? (
+                      )}
+
+                      {downloads.linux.standalone && (
                         <a
-                          href={downloads.windows}
+                          href={downloads.linux.standalone}
                           download
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          onClick={() => setShowDownloadMenu(false)}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-green-400 group-hover:scale-110 transition-transform">
+                            <Monitor className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-medium">Standalone App</div>
+                            <div className="text-[10px] text-text-tertiary">Linux Executable</div>
+                          </div>
+                        </a>
+                      )}
+                      
+                      {/* Windows Downloads */}
+                      {(downloads.windows.vst3 || downloads.windows.standalone) && (
+                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider mt-2">Windows</div>
+                      )}
+
+                      {downloads.windows.vst3 && (
+                        <a
+                          href={downloads.windows.vst3}
+                          download
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
                           onClick={() => setShowDownloadMenu(false)}
                         >
                           <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
                             <Download className="w-4 h-4" />
                           </div>
                           <div>
-                            <div className="font-medium">Windows VST3</div>
-                            <div className="text-[10px] text-text-tertiary">Ready to install</div>
+                            <div className="font-medium">VST3 Plugin</div>
+                            <div className="text-[10px] text-text-tertiary">Windows VST3 Bundle</div>
                           </div>
                         </a>
-                      ) : null}
+                      )}
+
+                      {downloads.windows.standalone && (
+                        <a
+                          href={downloads.windows.standalone}
+                          download
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          onClick={() => setShowDownloadMenu(false)}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                            <Monitor className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-medium">Standalone App</div>
+                            <div className="text-[10px] text-text-tertiary">Windows Executable (.exe)</div>
+                          </div>
+                        </a>
+                      )}
                     </div>
                   </motion.div>
                 )}

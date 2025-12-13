@@ -605,7 +605,10 @@ app.post('/api/compile', async (req, res) => {
         '-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc',
         '-DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++',
         '-DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres',
-        '-DJUCE_BUILD_HELPER_TOOLS=OFF' // Disable helper tools for cross-compilation
+        '-DJUCE_BUILD_HELPER_TOOLS=OFF', // Disable helper tools for cross-compilation
+        '-DCMAKE_EXE_LINKER_FLAGS=-static', // Statically link libraries to avoid missing DLL errors
+        '-DCMAKE_SHARED_LINKER_FLAGS=-static',
+        '-DCMAKE_MODULE_LINKER_FLAGS=-static'
       )
     }
 
@@ -695,9 +698,20 @@ app.post('/api/compile', async (req, res) => {
       }
     }
 
+    // Check if Standalone was created
+    const ext = platform === 'windows' ? '.exe' : ''
+    const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
+    const standalonePath = path.join(standaloneDir, `${projectName}${ext}`)
+    let standaloneExists = false
+    try {
+      await fs.access(standalonePath)
+      standaloneExists = true
+    } catch {}
+
     sendEvent('complete', { 
       message: 'Compilation successful!',
-      downloadUrl: `/api/download/${projectName}?platform=${platform}`
+      downloadUrl: `/api/download/${projectName}?platform=${platform}&type=vst3`,
+      downloadStandaloneUrl: standaloneExists ? `/api/download/${projectName}?platform=${platform}&type=standalone` : null
     })
 
     res.end()
@@ -709,46 +723,64 @@ app.post('/api/compile', async (req, res) => {
   }
 })
 
-// Download the compiled VST3
+// Download the compiled VST3 or Standalone
 app.get('/api/download/:projectName', async (req, res) => {
   const { projectName } = req.params
-  const { platform = 'linux' } = req.query
+  const { platform = 'linux', type = 'vst3' } = req.query
   const projectDir = path.join(PLUGINS_DIR, projectName)
   const buildDirName = `build_${platform}`
 
   try {
-    // Target path as requested: MyPlugins/[PROJECTNAME]/build_[platform]/[PROJECTNAME]_artefacts/Release/VST3/[PROJECTNAME].vst3
-    const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
-    let vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
+    let targetPath = ''
+    let zipName = ''
+
+    if (type === 'standalone') {
+      // Standalone path
+      const ext = platform === 'windows' ? '.exe' : ''
+      const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
+      targetPath = path.join(standaloneDir, `${projectName}${ext}`)
+      zipName = `${projectName}_${platform}_standalone.zip`
+      
+      console.log(`[Download] Request for Standalone ${projectName} (${platform})`)
+    } else {
+      // VST3 path
+      const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
+      targetPath = path.join(artefactsDir, `${projectName}.vst3`)
+      zipName = `${projectName}_${platform}.vst3.zip`
+      
+      console.log(`[Download] Request for VST3 ${projectName} (${platform})`)
+    }
     
-    console.log(`[Download] Request for ${projectName} (${platform})`)
-    console.log(`[Download] Looking for VST3 at: ${vst3Path}`)
+    console.log(`[Download] Looking for target at: ${targetPath}`)
 
     try {
-      await fs.access(vst3Path)
+      await fs.access(targetPath)
     } catch (e) {
-      console.error(`[Download] VST3 not found at ${vst3Path}`)
+      console.error(`[Download] Target not found at ${targetPath}`)
       
-      // Fallback: Try without 'Release' just in case
-      const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
-      try {
-        await fs.access(altPath)
-        console.log(`[Download] Found at alternative path: ${altPath}`)
-        vst3Path = altPath
-      } catch {
-        return res.status(404).json({ error: 'VST3 not found. Please try compiling again.' })
+      if (type !== 'standalone') {
+        // Fallback for VST3: Try without 'Release' just in case
+        const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
+        try {
+          await fs.access(altPath)
+          console.log(`[Download] Found at alternative path: ${altPath}`)
+          targetPath = altPath
+        } catch {
+          return res.status(404).json({ error: 'VST3 not found. Please try compiling again.' })
+        }
+      } else {
+        return res.status(404).json({ error: 'Standalone executable not found. Please try compiling again.' })
       }
     }
 
-    // Create a zip of the VST3 bundle
-    const zipPath = path.join(projectDir, `${projectName}_${platform}.vst3.zip`)
-    console.log(`[Download] Zipping ${vst3Path} to ${zipPath}`)
+    // Create a zip of the target
+    const zipPath = path.join(projectDir, zipName)
+    console.log(`[Download] Zipping ${targetPath} to ${zipPath}`)
     
-    // For Windows, if it's a folder, zip it. If it's a file (unlikely for VST3 but possible with MinGW), zip it.
-    // VST3 is usually a bundle (folder).
-    await execAsync(`cd "${path.dirname(vst3Path)}" && zip -r "${zipPath}" "${path.basename(vst3Path)}"`)
+    // Zip command
+    await execAsync(`cd "${path.dirname(targetPath)}" && zip -r "${zipPath}" "${path.basename(targetPath)}"`)
 
-    res.download(zipPath, `${projectName}_${platform}.vst3.zip`)
+    res.download(zipPath, zipName)
 
   } catch (error) {
     console.error('Download error:', error)
@@ -1196,27 +1228,55 @@ app.get('/api/projects/:projectName/build-status', async (req, res) => {
   const projectDir = path.join(PLUGINS_DIR, projectName)
   const buildDirName = `build_${platform}`
   
+  console.log(`[BuildStatus] Checking ${projectName} for ${platform}`)
+
   try {
     // Check for VST3
-    const artefactsDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
-    const vst3Path = path.join(artefactsDir, `${projectName}.vst3`)
+    const vst3Dir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'VST3')
+    const vst3Path = path.join(vst3Dir, `${projectName}.vst3`)
     const altPath = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'VST3', `${projectName}.vst3`)
     
-    let exists = false
+    console.log(`[BuildStatus] Checking VST3 at: ${vst3Path}`)
+    
+    let vst3Exists = false
     try {
       await fs.access(vst3Path)
-      exists = true
+      vst3Exists = true
+      console.log(`[BuildStatus] Found VST3 at primary path`)
     } catch {
       try {
+        console.log(`[BuildStatus] Checking VST3 at alt path: ${altPath}`)
         await fs.access(altPath)
-        exists = true
-      } catch {}
+        vst3Exists = true
+        console.log(`[BuildStatus] Found VST3 at alt path`)
+      } catch (e) {
+        console.log(`[BuildStatus] VST3 not found`)
+      }
+    }
+
+    // Check for Standalone
+    const ext = platform === 'windows' ? '.exe' : ''
+    const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
+    const standalonePath = path.join(standaloneDir, `${projectName}${ext}`)
+    
+    console.log(`[BuildStatus] Checking Standalone at: ${standalonePath}`)
+
+    let standaloneExists = false
+    try {
+      await fs.access(standalonePath)
+      standaloneExists = true
+      console.log(`[BuildStatus] Found Standalone`)
+    } catch (e) {
+      console.log(`[BuildStatus] Standalone not found`)
     }
     
     res.json({ 
       success: true, 
-      compiled: exists,
-      downloadUrl: exists ? `/api/download/${projectName}?platform=${platform}` : null
+      compiled: vst3Exists, // Keep for backward compatibility
+      vst3Exists,
+      standaloneExists,
+      downloadUrl: vst3Exists ? `/api/download/${projectName}?platform=${platform}&type=vst3` : null,
+      downloadStandaloneUrl: standaloneExists ? `/api/download/${projectName}?platform=${platform}&type=standalone` : null
     })
   } catch (error) {
     console.error('Build status check error:', error)

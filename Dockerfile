@@ -92,7 +92,9 @@ RUN git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.g
     # Make Projucer available system-wide
     && ln -sf ${JUCE_PATH}/cmake-build/extras/Projucer/Projucer_artefacts/Release/Projucer /usr/local/bin/Projucer \
     # Clean up build artifacts to save space
-    && rm -rf ${JUCE_PATH}/cmake-build
+    && rm -rf ${JUCE_PATH}/cmake-build \
+    # Fix VST3 SDK Windows.h casing for MinGW cross-compilation
+    && sed -i 's/#include <Windows.h>/#include <windows.h>/g' ${JUCE_PATH}/modules/juce_audio_processors/format_types/VST3_SDK/public.sdk/samples/vst-utilities/moduleinfotool/source/main.cpp
 
 # Set CMake to find JUCE automatically
 ENV CMAKE_PREFIX_PATH=${JUCE_PATH}
