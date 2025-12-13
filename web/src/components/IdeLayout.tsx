@@ -77,6 +77,7 @@ export function IdeLayout({
   const consoleEndRef = useRef<HTMLDivElement>(null)
   const downloadMenuRef = useRef<HTMLDivElement>(null)
   const compileMenuRef = useRef<HTMLDivElement>(null)
+  const miniLogRef = useRef<HTMLDivElement>(null)
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -101,7 +102,12 @@ export function IdeLayout({
     } else {
       consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [logs, activeTab])
+    
+    // Auto-scroll mini log window
+    if (miniLogRef.current) {
+      miniLogRef.current.scrollTop = miniLogRef.current.scrollHeight
+    }
+  }, [logs, activeTab, isWorking])
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault()
@@ -469,14 +475,44 @@ export function IdeLayout({
                     </motion.div>
                   ))}
                   {isWorking && (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center gap-3 text-text-tertiary text-xs ml-2 bg-white/5 self-start px-4 py-2 rounded-full"
-                    >
-                      <Loader2 className="w-3 h-3 animate-spin text-accent" />
-                      <span>{status === 'compiling' ? 'Compiling...' : 'Claude is thinking...'}</span>
-                    </motion.div>
+                    <div className="ml-2 self-start max-w-[90%] space-y-2">
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex items-center gap-3 text-text-tertiary text-xs bg-white/5 px-4 py-2 rounded-full w-fit"
+                      >
+                        <Loader2 className="w-3 h-3 animate-spin text-accent" />
+                        <span>{status === 'compiling' ? 'Compiling...' : 'Claude is thinking...'}</span>
+                      </motion.div>
+                      
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="bg-black/40 rounded-lg border border-white/10 overflow-hidden"
+                      >
+                        <div 
+                          ref={miniLogRef}
+                          className="h-24 overflow-y-auto p-3 font-mono text-[10px] text-text-tertiary space-y-1"
+                        >
+                          {logs.slice(-50).map((log, i) => (
+                            <div key={i} className="break-all">
+                              <span className="opacity-50 mr-2">
+                                {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </span>
+                              <span className={
+                                log.type === 'error' ? 'text-red-400' :
+                                log.type === 'success' ? 'text-green-400' :
+                                log.type === 'file' ? 'text-blue-400' :
+                                'opacity-80'
+                              }>
+                                {log.message}
+                              </span>
+                            </div>
+                          ))}
+                          {logs.length === 0 && <span className="opacity-30 italic">Waiting for logs...</span>}
+                        </div>
+                      </motion.div>
+                    </div>
                   )}
                   <div ref={chatEndRef} />
                 </div>
