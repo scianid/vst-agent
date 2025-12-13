@@ -44,6 +44,41 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
+# Layer 1.5: MacOS Cross-Compilation Toolchain (osxcross)
+# =============================================================================
+# Install dependencies for osxcross
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    patch \
+    libssl-dev \
+    liblzma-dev \
+    libxml2-dev \
+    xz-utils \
+    bzip2 \
+    cpio \
+    libbz2-dev \
+    zlib1g-dev \
+    llvm-dev \
+    uuid-dev \
+    python3 \
+    python-is-python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Setup osxcross environment variables
+ENV OSXCROSS_PATH=/opt/osxcross
+ENV PATH="${OSXCROSS_PATH}/target/bin:${PATH}"
+
+# Clone, download SDK, and build osxcross
+RUN git clone https://github.com/tpoechtrager/osxcross.git ${OSXCROSS_PATH} \
+    && cd ${OSXCROSS_PATH} \
+    # Download MacOSX 11.3 SDK
+    && wget -P tarballs/ https://github.com/joseluisq/macosx-sdks/releases/download/11.3/MacOSX11.3.sdk.tar.xz \
+    # Build (UNATTENDED=1 avoids prompts)
+    && UNATTENDED=1 ./build.sh \
+    # Cleanup
+    && rm -rf ${OSXCROSS_PATH}/tarballs/* \
+    && rm -rf ${OSXCROSS_PATH}/build
+
+# =============================================================================
 # Layer 2: Audio & GUI Dependencies for JUCE
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
