@@ -44,11 +44,14 @@ if [ -d "/home/dev/web" ]; then
     echo -e "${CYAN}Starting Web UI...${NC}"
     cd /home/dev/web
     
-    # Always reinstall for Linux architecture (Windows node_modules won't work)
+    # Only install if node_modules is missing to save time
     if [ -f "package.json" ]; then
-        echo -e "  Installing dependencies for Linux..."
-        rm -rf node_modules package-lock.json 2>/dev/null || true
-        npm install --silent 2>/dev/null
+        if [ ! -d "node_modules" ]; then
+            echo -e "  Installing dependencies for Linux..."
+            npm install --silent 2>/dev/null
+        else
+            echo -e "  Using existing node_modules..."
+        fi
     fi
     
     # Start API server in background

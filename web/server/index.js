@@ -615,9 +615,7 @@ app.post('/api/compile', async (req, res) => {
       )
     } else if (platform === 'mac') {
       cmakeArgs.push(
-        '-DCMAKE_SYSTEM_NAME=Darwin',
-        '-DCMAKE_C_COMPILER=o64-clang',
-        '-DCMAKE_CXX_COMPILER=o64-clang++',
+        '-DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/target/toolchain.cmake',
         '-DCMAKE_OSX_ARCHITECTURES=x86_64',
         '-DJUCE_BUILD_HELPER_TOOLS=OFF'
       )
