@@ -10,7 +10,8 @@ const app = express()
 const PORT = 3001
 
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
 // Plugin storage directory
 const PLUGINS_DIR = process.env.PLUGINS_DIR || '/home/dev/MyPlugins'
@@ -511,8 +512,8 @@ app.post('/api/compile', async (req, res) => {
       '-DCMAKE_PREFIX_PATH=/opt/JUCE'
     ]
 
-    if (platform === 'windows') {
-      // For Windows cross-compilation, we first need to build juceaide for the host (Linux)
+    if (platform === 'windows' || platform === 'mac') {
+      // For cross-compilation, we first need to build juceaide for the host (Linux)
       sendEvent('log', { message: 'Building host tools (juceaide) for cross-compilation...' })
       
       const hostBuildDir = 'build_host'
@@ -599,7 +600,9 @@ app.post('/api/compile', async (req, res) => {
       } else {
         sendEvent('log', { message: 'Warning: Could not find juceaide. Cross-compilation might fail.' })
       }
+    }
 
+    if (platform === 'windows') {
       cmakeArgs.push(
         '-DCMAKE_SYSTEM_NAME=Windows',
         '-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc',
@@ -609,6 +612,14 @@ app.post('/api/compile', async (req, res) => {
         '-DCMAKE_EXE_LINKER_FLAGS=-static', // Statically link libraries to avoid missing DLL errors
         '-DCMAKE_SHARED_LINKER_FLAGS=-static',
         '-DCMAKE_MODULE_LINKER_FLAGS=-static'
+      )
+    } else if (platform === 'mac') {
+      cmakeArgs.push(
+        '-DCMAKE_SYSTEM_NAME=Darwin',
+        '-DCMAKE_C_COMPILER=o64-clang',
+        '-DCMAKE_CXX_COMPILER=o64-clang++',
+        '-DCMAKE_OSX_ARCHITECTURES=x86_64',
+        '-DJUCE_BUILD_HELPER_TOOLS=OFF'
       )
     }
 
@@ -699,7 +710,10 @@ app.post('/api/compile', async (req, res) => {
     }
 
     // Check if Standalone was created
-    const ext = platform === 'windows' ? '.exe' : ''
+    let ext = ''
+    if (platform === 'windows') ext = '.exe'
+    else if (platform === 'mac') ext = '.app'
+    
     const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
     const standalonePath = path.join(standaloneDir, `${projectName}${ext}`)
     let standaloneExists = false
@@ -736,7 +750,10 @@ app.get('/api/download/:projectName', async (req, res) => {
 
     if (type === 'standalone') {
       // Standalone path
-      const ext = platform === 'windows' ? '.exe' : ''
+      let ext = ''
+      if (platform === 'windows') ext = '.exe'
+      else if (platform === 'mac') ext = '.app'
+      
       const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
       targetPath = path.join(standaloneDir, `${projectName}${ext}`)
       zipName = `${projectName}_${platform}_standalone.zip`
@@ -1255,7 +1272,10 @@ app.get('/api/projects/:projectName/build-status', async (req, res) => {
     }
 
     // Check for Standalone
-    const ext = platform === 'windows' ? '.exe' : ''
+    let ext = ''
+    if (platform === 'windows') ext = '.exe'
+    else if (platform === 'mac') ext = '.app'
+    
     const standaloneDir = path.join(projectDir, buildDirName, `${projectName}_artefacts`, 'Release', 'Standalone')
     const standalonePath = path.join(standaloneDir, `${projectName}${ext}`)
     

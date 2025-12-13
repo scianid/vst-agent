@@ -38,15 +38,68 @@ interface IdeLayoutProps {
   fileContent: string
   logs: LogEntry[]
   status: 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
-  downloads: { linux: DownloadLinks, windows: DownloadLinks }
+  downloads: { linux: DownloadLinks, windows: DownloadLinks, mac: DownloadLinks }
   isWorking: boolean
-  platform: 'linux' | 'windows'
-  onPlatformChange: (platform: 'linux' | 'windows') => void
-  onCompile: (platform?: 'linux' | 'windows') => void
+  platform: 'linux' | 'windows' | 'mac'
+  onPlatformChange: (platform: 'linux' | 'windows' | 'mac') => void
+  onCompile: (platform?: 'linux' | 'windows' | 'mac') => void
   onSelectFile: (path: string) => void
   onSendPrompt: (prompt: string) => void
   onBack: () => void
   onRefreshFiles: () => void
+}
+
+const ChatBubble = ({ msg, onFixError }: { msg: LogEntry, onFixError: () => void }) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const message = msg.message || ''
+  const isLong = message.length > 500 || message.split('\n').length > 10
+  
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex flex-col ${msg.type === 'user_prompt' ? 'items-end' : 'items-start'}`}
+    >
+      <div 
+        className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap shadow-sm ${
+          msg.type === 'user_prompt' 
+            ? 'bg-accent text-white rounded-br-none' 
+            : msg.type === 'error' 
+              ? 'bg-red-500/10 text-red-400 border border-red-500/20 rounded-bl-none'
+              : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
+        }`}
+      >
+        <div className={!isExpanded && isLong ? "max-h-60 overflow-hidden relative" : ""}>
+           {message}
+           {!isExpanded && isLong && (
+             <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-black/20 to-transparent" />
+           )}
+        </div>
+        
+        {isLong && (
+          <button 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-xs opacity-70 hover:opacity-100 mt-2 font-medium underline decoration-dotted"
+          >
+            {isExpanded ? "Show less" : "Show more"}
+          </button>
+        )}
+
+        {msg.type === 'error' && (
+          <button
+            onClick={onFixError}
+            className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-xs font-medium text-red-200 transition-colors w-fit"
+          >
+            <Sparkles className="w-3 h-3" />
+            Fix It
+          </button>
+        )}
+      </div>
+      <span className="text-[10px] text-text-tertiary mt-1.5 px-1">
+        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>
+    </motion.div>
+  )
 }
 
 export function IdeLayout({
@@ -146,6 +199,7 @@ export function IdeLayout({
       .slice(-100)
       .map(l => l.message)
       .join('\n')
+      .slice(-50000) // Limit to last 50k chars to avoid payload too large
     
     onSendPrompt(`The compilation failed. Please analyze the logs and fix the issue.\n\nLogs:\n${recentLogs}`)
   }
@@ -157,58 +211,6 @@ export function IdeLayout({
     log.type === 'complete' ||
     log.type === 'error'
   )
-
-  const ChatBubble = ({ msg, onFixError }: { msg: LogEntry, onFixError: () => void }) => {
-    const [isExpanded, setIsExpanded] = useState(false)
-    const isLong = msg.message.length > 500 || msg.message.split('\n').length > 10
-    
-    return (
-      <motion.div 
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={`flex flex-col ${msg.type === 'user_prompt' ? 'items-end' : 'items-start'}`}
-      >
-        <div 
-          className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm break-words whitespace-pre-wrap shadow-sm ${
-            msg.type === 'user_prompt' 
-              ? 'bg-accent text-white rounded-br-none' 
-              : msg.type === 'error' 
-                ? 'bg-red-500/10 text-red-400 border border-red-500/20 rounded-bl-none'
-                : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
-          }`}
-        >
-          <div className={!isExpanded && isLong ? "max-h-60 overflow-hidden relative" : ""}>
-             {msg.message}
-             {!isExpanded && isLong && (
-               <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-black/20 to-transparent" />
-             )}
-          </div>
-          
-          {isLong && (
-            <button 
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="text-xs opacity-70 hover:opacity-100 mt-2 font-medium underline decoration-dotted"
-            >
-              {isExpanded ? "Show less" : "Show more"}
-            </button>
-          )}
-
-          {msg.type === 'error' && (
-            <button
-              onClick={onFixError}
-              className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-xs font-medium text-red-200 transition-colors w-fit"
-            >
-              <Sparkles className="w-3 h-3" />
-              Fix It
-            </button>
-          )}
-        </div>
-        <span className="text-[10px] text-text-tertiary mt-1.5 px-1">
-          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-      </motion.div>
-    )
-  }
 
   // File Tree Component
   const FileTreeNode = ({ node, depth = 0 }: { node: FileNode; depth?: number }) => {
@@ -341,13 +343,28 @@ export function IdeLayout({
                         <div className="text-[10px] text-text-tertiary">Native Build</div>
                       </div>
                     </button>
+                    <button
+                      onClick={() => {
+                        onCompile('mac')
+                        setShowCompileMenu(false)
+                      }}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
+                        <Monitor className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-medium">macOS</div>
+                        <div className="text-[10px] text-text-tertiary">Cross-Compile</div>
+                      </div>
+                    </button>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
           
-          {(status === 'compiled' || downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone) && (
+          {(status === 'compiled' || downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone || downloads.mac.vst3 || downloads.mac.standalone) && (
             <div className="relative" ref={downloadMenuRef}>
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
@@ -365,11 +382,11 @@ export function IdeLayout({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     transition={{ duration: 0.1 }}
-                    className="absolute right-0 top-full mt-2 w-72 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                    className="absolute right-0 top-full mt-2 w-72 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 max-h-[80vh] overflow-y-auto"
                   >
                     <div className="p-1">
                       {/* Empty State */}
-                      {!(downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone) && (
+                      {!(downloads.linux.vst3 || downloads.linux.standalone || downloads.windows.vst3 || downloads.windows.standalone || downloads.mac.vst3 || downloads.mac.standalone) && (
                         <div className="px-4 py-3 text-sm text-text-tertiary text-center">
                           <div className="mb-1">No downloads found</div>
                           <div className="text-xs opacity-50">Try compiling again</div>
@@ -453,6 +470,45 @@ export function IdeLayout({
                           </div>
                         </a>
                       )}
+
+                      {/* macOS Downloads */}
+                      {(downloads.mac.vst3 || downloads.mac.standalone) && (
+                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider mt-2">macOS</div>
+                      )}
+
+                      {downloads.mac.vst3 && (
+                        <a
+                          href={downloads.mac.vst3}
+                          download
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          onClick={() => setShowDownloadMenu(false)}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
+                            <Download className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-medium">VST3 Plugin</div>
+                            <div className="text-[10px] text-text-tertiary">macOS VST3 Bundle</div>
+                          </div>
+                        </a>
+                      )}
+
+                      {downloads.mac.standalone && (
+                        <a
+                          href={downloads.mac.standalone}
+                          download
+                          className="flex items-center gap-3 px-4 py-2 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors w-full text-left group"
+                          onClick={() => setShowDownloadMenu(false)}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
+                            <Monitor className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-medium">Standalone App</div>
+                            <div className="text-[10px] text-text-tertiary">macOS App Bundle</div>
+                          </div>
+                        </a>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -532,25 +588,32 @@ export function IdeLayout({
                         className="bg-black/40 rounded-lg border border-white/10 overflow-hidden"
                       >
                         <div 
-                          ref={miniLogRef}
-                          className="h-24 overflow-y-auto p-3 font-mono text-[10px] text-text-tertiary space-y-1"
+                          className="p-3 font-mono text-[10px] text-text-tertiary space-y-1"
                         >
-                          {logs.slice(-50).map((log, i) => (
-                            <div key={i} className="break-all">
-                              <span className="opacity-50 mr-2">
+                          {logs.slice(-4).map((log, i) => (
+                            <div key={i} className="truncate flex items-center">
+                              <span className="opacity-50 mr-2 shrink-0">
                                 {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                               </span>
-                              <span className={
+                              <span className={`truncate ${
                                 log.type === 'error' ? 'text-red-400' :
                                 log.type === 'success' ? 'text-green-400' :
                                 log.type === 'file' ? 'text-blue-400' :
                                 'opacity-80'
-                              }>
+                              }`}>
                                 {log.message}
                               </span>
                             </div>
                           ))}
                           {logs.length === 0 && <span className="opacity-30 italic">Waiting for logs...</span>}
+                          
+                          <button 
+                            onClick={() => setActiveTab('console')}
+                            className="w-full text-left mt-2 pt-2 border-t border-white/5 text-[10px] text-accent hover:text-accent-hover transition-colors flex items-center gap-1"
+                          >
+                            <Terminal className="w-3 h-3" />
+                            View all logs
+                          </button>
                         </div>
                       </motion.div>
                     </div>
