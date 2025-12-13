@@ -31,9 +31,10 @@ export function Create() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [, setError] = useState('')
   const [downloadUrl, setDownloadUrl] = useState('')
-  const [downloads, setDownloads] = useState<{ linux: DownloadLinks, windows: DownloadLinks }>({ 
+  const [downloads, setDownloads] = useState<{ linux: DownloadLinks, windows: DownloadLinks, mac: DownloadLinks }>({ 
     linux: { vst3: null, standalone: null }, 
-    windows: { vst3: null, standalone: null } 
+    windows: { vst3: null, standalone: null },
+    mac: { vst3: null, standalone: null }
   })
   const [fileTree, setFileTree] = useState<FileNode[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
@@ -42,7 +43,7 @@ export function Create() {
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Project[]>([])
-  const [platform, setPlatform] = useState<'linux' | 'windows'>('windows')
+  const [platform, setPlatform] = useState<'linux' | 'windows' | 'mac'>('windows')
   const logsEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -146,6 +147,10 @@ export function Create() {
       const resWin = await fetch(`/api/projects/${name}/build-status?platform=windows`)
       const dataWin = await resWin.json()
 
+      // Check Mac
+      const resMac = await fetch(`/api/projects/${name}/build-status?platform=mac`)
+      const dataMac = await resMac.json()
+
       setDownloads({
         linux: {
           vst3: dataLinux.vst3Exists ? dataLinux.downloadUrl : null,
@@ -154,12 +159,17 @@ export function Create() {
         windows: {
           vst3: dataWin.vst3Exists ? dataWin.downloadUrl : null,
           standalone: dataWin.standaloneExists ? dataWin.downloadStandaloneUrl : null
+        },
+        mac: {
+          vst3: dataMac.vst3Exists ? dataMac.downloadUrl : null,
+          standalone: dataMac.standaloneExists ? dataMac.downloadStandaloneUrl : null
         }
       })
       
       // Update status if currently selected platform is compiled
       if ((platform === 'linux' && (dataLinux.vst3Exists || dataLinux.standaloneExists)) || 
-          (platform === 'windows' && (dataWin.vst3Exists || dataWin.standaloneExists))) {
+          (platform === 'windows' && (dataWin.vst3Exists || dataWin.standaloneExists)) ||
+          (platform === 'mac' && (dataMac.vst3Exists || dataMac.standaloneExists))) {
          setStatus('compiled')
       } else {
          // If we are just checking status on load/switch, and it's not compiled, 
@@ -181,7 +191,8 @@ export function Create() {
     setDownloadUrl('')
     setDownloads({ 
       linux: { vst3: null, standalone: null }, 
-      windows: { vst3: null, standalone: null } 
+      windows: { vst3: null, standalone: null },
+      mac: { vst3: null, standalone: null }
     })
     setPrompt('')
     setFileTree([])
@@ -427,7 +438,7 @@ export function Create() {
     }
   }
 
-  const handlePlatformChange = (newPlatform: 'linux' | 'windows') => {
+  const handlePlatformChange = (newPlatform: 'linux' | 'windows' | 'mac') => {
     setPlatform(newPlatform)
     // Check if compiled for new platform
     if (projectName) {
@@ -440,7 +451,7 @@ export function Create() {
     }
   }
 
-  const handleCompile = async (platformOverride?: 'linux' | 'windows') => {
+  const handleCompile = async (platformOverride?: 'linux' | 'windows' | 'mac') => {
     if (!projectName) return
 
     const targetPlatform = platformOverride || platform
