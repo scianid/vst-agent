@@ -66,7 +66,9 @@ const ChatBubble = ({ msg, onFixError }: { msg: LogEntry, onFixError: () => void
             ? 'bg-accent text-white rounded-br-none' 
             : msg.type === 'error' 
               ? 'bg-red-500/10 text-red-400 border border-red-500/20 rounded-bl-none'
-              : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
+              : msg.type === 'success'
+                ? 'bg-green-500/10 text-green-400 border border-green-500/20 rounded-bl-none'
+                : 'bg-white/10 text-text-primary border border-white/5 rounded-bl-none'
         }`}
       >
         <div className={!isExpanded && isLong ? "max-h-60 overflow-hidden relative" : ""}>
@@ -209,7 +211,8 @@ export function IdeLayout({
     log.type === 'user_prompt' || 
     (log.type === 'claude' && !log.message.startsWith('🔧')) || // Hide tool use in chat
     log.type === 'complete' ||
-    log.type === 'error'
+    log.type === 'error' ||
+    log.type === 'success'
   )
 
   // File Tree Component
