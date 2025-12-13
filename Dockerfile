@@ -189,9 +189,6 @@ RUN ln -sf /opt/vibevst/vibevst.py /usr/local/bin/vibevst
 # =============================================================================
 WORKDIR /home/dev/MyPlugins
 
-# API Key (to be provided at runtime)
-ENV ANTHROPIC_API_KEY=""
-
 # JUCE global paths
 ENV JUCE_GLOBAL_MODULE_PATH=${JUCE_MODULES_PATH}
 
