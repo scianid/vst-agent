@@ -790,12 +790,63 @@ app.get('/api/download/:projectName', async (req, res) => {
       }
     }
 
+    // FIX: Ensure executable permissions for Mac bundles (VST3 and App)
+    if (platform === 'mac') {
+        try {
+            console.log(`[Download] Fixing permissions for Mac bundle: ${targetPath}`);
+            // Recursive chmod to ensure the inner binary and folders are executable/readable
+            await execAsync(`chmod -R 755 "${targetPath}"`);
+            
+            // Validate binary type and architecture
+            try {
+                // Find the actual binary inside the bundle
+                // VST3: MyPlugin.vst3/Contents/MacOS/MyPlugin
+                // App: MyPlugin.app/Contents/MacOS/MyPlugin
+                const binaryName = projectName; 
+                const binaryPath = path.join(targetPath, 'Contents', 'MacOS', binaryName);
+                
+                console.log(`[Download] Validating binary at: ${binaryPath}`);
+                
+                // Check if binary exists
+                try {
+                    await fs.access(binaryPath);
+                } catch {
+                    console.error(`[Download] CRITICAL: Binary not found at ${binaryPath}`);
+                    throw new Error('Binary missing from bundle');
+                }
+
+                // Check file type using 'file' command
+                const { stdout: fileInfo } = await execAsync(`file "${binaryPath}"`);
+                console.log(`[Download] Binary info: ${fileInfo.trim()}`);
+                
+                if (!fileInfo.includes('Mach-O')) {
+                    console.warn('[Download] WARNING: File does not appear to be a Mach-O binary!');
+                }
+            } catch (e) {
+                console.log(`[Download] Validation failed: ${e.message}`);
+            }
+
+            // Try to ad-hoc sign (helps with Apple Silicon)
+            try {
+                console.log('[Download] Attempting ad-hoc signature...');
+                // Try standard codesign (might be available in some cross-envs)
+                await execAsync(`codesign --force --deep -s - "${targetPath}"`);
+            } catch (e) {
+                // If standard codesign fails, try osxcross specific one if we can guess it
+                // But usually xattr -cr is what's needed on the client side
+                console.log('[Download] Ad-hoc signing skipped (tools not found or failed)');
+            }
+        } catch (e) {
+            console.error('[Download] Failed to fix permissions:', e);
+        }
+    }
+
     // Create a zip of the target
     const zipPath = path.join(projectDir, zipName)
     console.log(`[Download] Zipping ${targetPath} to ${zipPath}`)
     
-    // Zip command
-    await execAsync(`cd "${path.dirname(targetPath)}" && zip -r "${zipPath}" "${path.basename(targetPath)}"`)
+    // Zip command - use -y to preserve symlinks
+    await execAsync(`cd "${path.dirname(targetPath)}" && zip -ry "${zipPath}" "${path.basename(targetPath)}"`)
 
     res.download(zipPath, zipName)
 
@@ -1301,6 +1352,35 @@ app.get('/api/projects/:projectName/build-status', async (req, res) => {
   } catch (error) {
     console.error('Build status check error:', error)
     res.status(500).json({ error: 'Failed to check build status' })
+  }
+})
+
+// Clean build artifacts
+app.delete('/api/projects/:projectName/build', async (req, res) => {
+  const { projectName } = req.params
+  const { platform } = req.query
+
+  if (!projectName || !platform) {
+    return res.status(400).json({ error: 'Missing project name or platform' })
+  }
+
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const buildDirName = `build_${platform}`
+  const buildDir = path.join(projectDir, buildDirName)
+
+  try {
+    console.log(`Cleaning build directory: ${buildDir}`)
+    await fs.rm(buildDir, { recursive: true, force: true })
+    
+    appendLog(projectDir, { 
+        type: 'info', 
+        message: `Cleaned build artifacts for ${platform}` 
+    })
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Clean error:', error)
+    res.status(500).json({ error: 'Failed to clean build' })
   }
 })
 

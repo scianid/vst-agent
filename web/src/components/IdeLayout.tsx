@@ -3,7 +3,7 @@ import {
   FolderTree, File, ChevronRight, ChevronDown, 
   Play, Download, ArrowLeft, 
   MessageSquare, Terminal, Send, Loader2,
-  Copy, Check, Sparkles, Monitor, Cpu
+  Copy, Check, Sparkles, Monitor, Cpu, AlertCircle, Trash2
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -43,6 +43,7 @@ interface IdeLayoutProps {
   platform: 'linux' | 'windows' | 'mac'
   onPlatformChange: (platform: 'linux' | 'windows' | 'mac') => void
   onCompile: (platform?: 'linux' | 'windows' | 'mac') => void
+  onClean: (platform: 'linux' | 'windows' | 'mac') => void
   onSelectFile: (path: string) => void
   onSendPrompt: (prompt: string) => void
   onBack: () => void
@@ -116,6 +117,7 @@ export function IdeLayout({
   platform,
   onPlatformChange,
   onCompile,
+  onClean,
   onSelectFile,
   onSendPrompt,
   onBack,
@@ -398,7 +400,20 @@ export function IdeLayout({
 
                       {/* Linux Downloads */}
                       {(downloads.linux.vst3 || downloads.linux.standalone) && (
-                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider">Linux</div>
+                        <div className="px-4 py-2 flex items-center justify-between group/header">
+                           <span className="text-xs font-bold text-text-tertiary uppercase tracking-wider">Linux</span>
+                           <button 
+                               onClick={(e) => {
+                                   e.stopPropagation();
+                                   onClean('linux');
+                                   setShowDownloadMenu(false);
+                               }}
+                               className="p-1 hover:bg-red-500/20 text-text-tertiary hover:text-red-400 rounded transition-colors opacity-0 group-hover/header:opacity-100"
+                               title="Clean Linux build artifacts"
+                           >
+                               <Trash2 className="w-3 h-3" />
+                           </button>
+                        </div>
                       )}
                       
                       {downloads.linux.vst3 && (
@@ -437,7 +452,20 @@ export function IdeLayout({
                       
                       {/* Windows Downloads */}
                       {(downloads.windows.vst3 || downloads.windows.standalone) && (
-                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider mt-2">Windows</div>
+                        <div className="px-4 py-2 flex items-center justify-between group/header mt-2">
+                           <span className="text-xs font-bold text-text-tertiary uppercase tracking-wider">Windows</span>
+                           <button 
+                               onClick={(e) => {
+                                   e.stopPropagation();
+                                   onClean('windows');
+                                   setShowDownloadMenu(false);
+                               }}
+                               className="p-1 hover:bg-red-500/20 text-text-tertiary hover:text-red-400 rounded transition-colors opacity-0 group-hover/header:opacity-100"
+                               title="Clean Windows build artifacts"
+                           >
+                               <Trash2 className="w-3 h-3" />
+                           </button>
+                        </div>
                       )}
 
                       {downloads.windows.vst3 && (
@@ -476,7 +504,32 @@ export function IdeLayout({
 
                       {/* macOS Downloads */}
                       {(downloads.mac.vst3 || downloads.mac.standalone) && (
-                        <div className="px-4 py-2 text-xs font-bold text-text-tertiary uppercase tracking-wider mt-2">macOS</div>
+                        <div className="px-4 py-2 flex items-center justify-between group/header">
+                           <div className="flex items-center gap-2">
+                               <span className="text-xs font-bold text-text-tertiary uppercase tracking-wider">macOS</span>
+                               <div className="group/info relative">
+                                  <AlertCircle className="w-3 h-3 text-text-tertiary hover:text-yellow-500 transition-colors cursor-help" />
+                                  <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-xl text-xs text-text-secondary z-50 hidden group-hover/info:block">
+                                    <div className="font-medium text-text-primary mb-1">"App is damaged"?</div>
+                                    <div className="mb-2 opacity-80">This is a macOS security check for downloaded apps. To fix, run this in Terminal:</div>
+                                    <code className="block p-2 bg-black/50 rounded border border-white/5 font-mono text-[10px] select-all break-all">
+                                      xattr -cr /path/to/plugin
+                                    </code>
+                                  </div>
+                               </div>
+                           </div>
+                           <button 
+                               onClick={(e) => {
+                                   e.stopPropagation();
+                                   onClean('mac');
+                                   setShowDownloadMenu(false);
+                               }}
+                               className="p-1 hover:bg-red-500/20 text-text-tertiary hover:text-red-400 rounded transition-colors opacity-0 group-hover/header:opacity-100"
+                               title="Clean macOS build artifacts"
+                           >
+                               <Trash2 className="w-3 h-3" />
+                           </button>
+                        </div>
                       )}
 
                       {downloads.mac.vst3 && (

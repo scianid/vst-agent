@@ -530,6 +530,38 @@ export function Create() {
     }
   }
 
+  const handleClean = async (targetPlatform: 'linux' | 'windows' | 'mac') => {
+    if (!projectName) return
+
+    addLog(`Cleaning build artifacts for ${targetPlatform}...`, 'info')
+    
+    try {
+      const response = await fetch(`/api/projects/${projectName}/build?platform=${targetPlatform}`, {
+        method: 'DELETE'
+      })
+
+      if (response.ok) {
+        addLog(`Cleaned ${targetPlatform} build artifacts`, 'success')
+        // Reset downloads for this platform
+        setDownloads(prev => ({
+          ...prev,
+          [targetPlatform]: { vst3: null, standalone: null }
+        }))
+        // Update status if needed
+        // If we cleaned the current platform, we are no longer compiled
+        if (platform === targetPlatform) {
+            setStatus('generated')
+        }
+      } else {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to clean')
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      addLog(`Clean error: ${message}`, 'error')
+    }
+  }
+
   const handleReset = () => {
     navigate('/')
   }
@@ -556,6 +588,7 @@ export function Create() {
           platform={platform}
           onPlatformChange={handlePlatformChange}
           onCompile={handleCompile}
+          onClean={handleClean}
           onSelectFile={fetchFileContent}
           onSendPrompt={handleSendPrompt}
           onBack={handleReset}
