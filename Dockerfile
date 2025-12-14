@@ -57,11 +57,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cpio \
     libbz2-dev \
     zlib1g-dev \
-    llvm-dev \
+    llvm-15-dev \
     uuid-dev \
     python3 \
     python-is-python3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Ensure osxcross uses LLVM 15 to match our clang-15 compiler
+    && update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-15 100
 
 # Setup osxcross environment variables
 ENV OSXCROSS_PATH=/opt/osxcross
@@ -129,7 +131,12 @@ RUN git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.g
     # Clean up build artifacts to save space
     && rm -rf ${JUCE_PATH}/cmake-build \
     # Fix VST3 SDK Windows.h casing for MinGW cross-compilation
-    && sed -i 's/#include <Windows.h>/#include <windows.h>/g' ${JUCE_PATH}/modules/juce_audio_processors/format_types/VST3_SDK/public.sdk/samples/vst-utilities/moduleinfotool/source/main.cpp
+    && sed -i 's/#include <Windows.h>/#include <windows.h>/g' ${JUCE_PATH}/modules/juce_audio_processors/format_types/VST3_SDK/public.sdk/samples/vst-utilities/moduleinfotool/source/main.cpp \
+    # Patch JUCE to allow using pre-built juceaide for cross-compilation
+    && echo 'if(DEFINED JUCE_TOOL_JUCEAIDE)\n    message(STATUS "Using provided juceaide: ${JUCE_TOOL_JUCEAIDE}")\n    add_executable(juceaide IMPORTED GLOBAL)\n    set_target_properties(juceaide PROPERTIES IMPORTED_LOCATION "${JUCE_TOOL_JUCEAIDE}")\n    add_executable(juce::juceaide ALIAS juceaide)\n    return()\nendif()' > /tmp/juceaide_patch.cmake \
+    && cat /tmp/juceaide_patch.cmake ${JUCE_PATH}/extras/Build/juceaide/CMakeLists.txt > /tmp/CMakeLists.txt.new \
+    && mv /tmp/CMakeLists.txt.new ${JUCE_PATH}/extras/Build/juceaide/CMakeLists.txt \
+    && rm /tmp/juceaide_patch.cmake
 
 # Set CMake to find JUCE automatically
 ENV CMAKE_PREFIX_PATH=${JUCE_PATH}

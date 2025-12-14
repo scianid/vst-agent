@@ -1,0 +1,7 @@
+if(DEFINED JUCE_TOOL_JUCEAIDE)
+    message(STATUS "Using provided juceaide: ${JUCE_TOOL_JUCEAIDE}")
+    add_executable(juceaide IMPORTED GLOBAL)
+    set_target_properties(juceaide PROPERTIES IMPORTED_LOCATION "${JUCE_TOOL_JUCEAIDE}")
+    add_executable(juce::juceaide ALIAS juceaide)
+    return()
+endif()

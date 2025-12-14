@@ -517,87 +517,86 @@ app.post('/api/compile', async (req, res) => {
       sendEvent('log', { message: 'Building host tools (juceaide) for cross-compilation...' })
       
       const hostBuildDir = 'build_host'
+      
+      // Clean host build to ensure fresh tools
+      try {
+          await fs.rm(path.join(projectDir, hostBuildDir), { recursive: true, force: true })
+      } catch (e) {}
+
       const hostArgs = [
         '-B', hostBuildDir,
         '-G', 'Ninja',
         '-DCMAKE_BUILD_TYPE=Release',
-        '-DCMAKE_PREFIX_PATH=/opt/JUCE'
+        '-DCMAKE_PREFIX_PATH=/opt/JUCE',
+        '-DJUCE_BUILD_HELPER_TOOLS=ON', // Explicitly ask for tools
+        '-DCMAKE_C_COMPILER=/usr/bin/gcc',
+        '-DCMAKE_CXX_COMPILER=/usr/bin/g++'
       ]
 
       // Configure host
       sendEvent('log', { message: 'Configuring host tools...' })
-      const hostConfigProcess = spawn('cmake', hostArgs, { cwd: projectDir })
+      // Use clean env for host build to avoid cross-compile vars leaking
+      const hostEnv = { ...process.env };
+      delete hostEnv.OSXCROSS_ROOT;
+      delete hostEnv.OSXCROSS_HOST;
+      delete hostEnv.OSXCROSS_TARGET_DIR;
+      delete hostEnv.OSXCROSS_TARGET;
+      delete hostEnv.OSXCROSS_SDK;
       
-      hostConfigProcess.stdout.on('data', (data) => {
-        // console.log(`[Host Config] ${data}`) 
-      })
-      hostConfigProcess.stderr.on('data', (data) => {
-        console.log(`[Host Config Err] ${data}`)
-      })
-
+      const hostConfigProcess = spawn('cmake', hostArgs, { cwd: projectDir, env: hostEnv })
+      
       await new Promise((resolve, reject) => {
         hostConfigProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host config failed: ${code}`)))
       })
 
-      // Build host tools (building the main project will trigger juceaide build)
-      sendEvent('log', { message: 'Building host tools...' })
-      // We build the default target which ensures dependencies like juceaide are built
-      const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir], { cwd: projectDir })
+      // Build juceaide explicitly
+      sendEvent('log', { message: 'Compiling host tools...' })
+      const hostBuildProcess = spawn('cmake', ['--build', hostBuildDir, '--target', 'juceaide'], { cwd: projectDir, env: hostEnv })
       
-      hostBuildProcess.stdout.on('data', (data) => {
-        // console.log(`[Host Build] ${data}`)
+      await new Promise((resolve, reject) => {
+        hostBuildProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host build failed: ${code}`)))
       })
-      hostBuildProcess.stderr.on('data', (data) => {
-        console.log(`[Host Build Err] ${data}`)
-      })
-
-      try {
-        await new Promise((resolve, reject) => {
-          hostBuildProcess.on('close', code => code === 0 ? resolve() : reject(new Error(`Host build failed: ${code}`)))
-        })
-      } catch (e) {
-        console.log('Host build step failed, checking if binary exists anyway...')
-        sendEvent('log', { message: 'Host build step failed, checking if binary exists anyway...' })
-      }
 
       // Find juceaide
-      // It's usually in build_host/juceaide_artefacts/Release/juceaide or similar
-      // We'll try to find it
       let juceaidePath = ''
       try {
-        // Common locations
+        // Look for the binary we just built
         const candidates = [
           path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'Release', 'juceaide'),
-          path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'juceaide'), // if not multi-config
+          path.join(projectDir, hostBuildDir, 'juceaide_artefacts', 'juceaide'),
           path.join(projectDir, hostBuildDir, 'bin', 'juceaide'),
-          path.join(projectDir, hostBuildDir, 'juceaide'),
-          // Deeply nested locations found in some setups
-          path.join(projectDir, hostBuildDir, 'JUCE', 'tools', 'extras', 'Build', 'juceaide', 'juceaide_artefacts', 'Debug', 'juceaide'),
+          // Correct path based on actual build output
+          path.join(projectDir, hostBuildDir, 'JUCE', 'extras', 'Build', 'juceaide', 'juceaide_artefacts', 'Release', 'juceaide'),
+          // Old path just in case
           path.join(projectDir, hostBuildDir, 'JUCE', 'tools', 'extras', 'Build', 'juceaide', 'juceaide_artefacts', 'Release', 'juceaide')
         ]
         
         for (const p of candidates) {
           try {
+            console.log(`Checking for juceaide at: ${p}`)
             await fs.access(p)
             juceaidePath = p
             break
-          } catch {}
+          } catch {
+            console.log(`Not found at: ${p}`)
+          }
         }
         
-        if (!juceaidePath) {
-           // Try to find it with find command as fallback
-           const { stdout } = await execAsync(`find ${path.join(projectDir, hostBuildDir)} -name juceaide -type f -executable | head -n 1`)
-           juceaidePath = stdout.trim()
+        if (juceaidePath) {
+           // Ensure executable
+           await execAsync(`chmod +x "${juceaidePath}"`)
+           sendEvent('log', { message: `Found juceaide at: ${juceaidePath}` })
+           // Pass variables with explicit types to ensure CMake picks them up
+           cmakeArgs.push(`-DJUCE_TOOL_JUCEAIDE:FILEPATH=${juceaidePath}`)
+           cmakeArgs.push(`-DJUCE_HOST_JUCEAIDE:FILEPATH=${juceaidePath}`)
+           cmakeArgs.push(`-DJUCEAIDE_PATH:FILEPATH=${juceaidePath}`)
+        } else {
+           throw new Error('Could not find built juceaide binary')
         }
       } catch (e) {
         console.error('Error finding juceaide:', e)
-      }
-
-      if (juceaidePath) {
-        sendEvent('log', { message: `Found juceaide at: ${juceaidePath}` })
-        cmakeArgs.push(`-DJUCE_TOOL_JUCEAIDE=${juceaidePath}`)
-      } else {
-        sendEvent('log', { message: 'Warning: Could not find juceaide. Cross-compilation might fail.' })
+        sendEvent('log', { message: 'Error: Could not find host juceaide. Cross-compilation will fail.' })
+        throw e
       }
     }
 
@@ -616,7 +615,7 @@ app.post('/api/compile', async (req, res) => {
       cmakeArgs.push(
         '-DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/target/toolchain.cmake',
         '-DCMAKE_OSX_ARCHITECTURES=x86_64',
-        '-DJUCE_BUILD_HELPER_TOOLS=OFF',
+        '-DJUCE_BUILD_HELPER_TOOLS:BOOL=OFF',
         '-DCMAKE_OSX_SYSROOT=/opt/osxcross/target/SDK/MacOSX11.3.sdk'
       )
     }
@@ -1212,6 +1211,18 @@ project(${projectName} VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# If we're cross-compiling, JUCE still needs a host-built juceaide binary.
+# When available, point JUCE at the standard build_host output to avoid JUCE
+# trying to bootstrap/build juceaide during the target configure step.
+if(CMAKE_CROSSCOMPILING)
+    set(_vibevst_host_juceaide "\${CMAKE_SOURCE_DIR}/build_host/JUCE/extras/Build/juceaide/juceaide_artefacts/Release/juceaide")
+    if(EXISTS "\${_vibevst_host_juceaide}")
+        set(JUCE_TOOL_JUCEAIDE "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
+        set(JUCE_HOST_JUCEAIDE "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
+        set(JUCEAIDE_PATH "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
+    endif()
+endif()
+
 # Add JUCE
 add_subdirectory(/opt/JUCE JUCE)
 
@@ -1277,7 +1288,7 @@ target_link_libraries(${projectName}
         juce::juce_opengl
     PUBLIC
         juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
+        # juce::juce_recommended_lto_flags # Disabled to prevent cross-compilation linker errors
         juce::juce_recommended_warning_flags
 )
 `
