@@ -13,6 +13,7 @@ ENV TZ=Etc/UTC
 # Layer 1: Base Linux Toolchain
 # =============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    nano \
     # Build essentials
     build-essential \
     gcc-12 \
@@ -132,11 +133,37 @@ RUN git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.g
     && rm -rf ${JUCE_PATH}/cmake-build \
     # Fix VST3 SDK Windows.h casing for MinGW cross-compilation
     && sed -i 's/#include <Windows.h>/#include <windows.h>/g' ${JUCE_PATH}/modules/juce_audio_processors/format_types/VST3_SDK/public.sdk/samples/vst-utilities/moduleinfotool/source/main.cpp \
-    # Patch JUCE to allow using pre-built juceaide for cross-compilation
-    && echo 'if(DEFINED JUCE_TOOL_JUCEAIDE)\n    message(STATUS "Using provided juceaide: ${JUCE_TOOL_JUCEAIDE}")\n    add_executable(juceaide IMPORTED GLOBAL)\n    set_target_properties(juceaide PROPERTIES IMPORTED_LOCATION "${JUCE_TOOL_JUCEAIDE}")\n    add_executable(juce::juceaide ALIAS juceaide)\n    return()\nendif()' > /tmp/juceaide_patch.cmake \
-    && cat /tmp/juceaide_patch.cmake ${JUCE_PATH}/extras/Build/juceaide/CMakeLists.txt > /tmp/CMakeLists.txt.new \
-    && mv /tmp/CMakeLists.txt.new ${JUCE_PATH}/extras/Build/juceaide/CMakeLists.txt \
-    && rm /tmp/juceaide_patch.cmake
+    # Patch JUCE: if JUCE_TOOL_JUCEAIDE is provided, use it and skip bootstrapping
+    # (prevents JUCE from trying to build juceaide and failing on missing ft2build.h during cross-compile)
+    && python3 - <<'PY'
+from pathlib import Path
+
+cmake_file = Path("/opt/JUCE/extras/Build/juceaide/CMakeLists.txt")
+text = cmake_file.read_text(encoding="utf-8")
+
+# Idempotent: don't patch twice
+if "DEFINED JUCE_TOOL_JUCEAIDE" in text or "Using provided juceaide:" in text:
+    print("JUCE juceaide already patched")
+else:
+    marker = "if(JUCE_BUILD_HELPER_TOOLS)"
+    if marker not in text:
+        raise SystemExit("Could not find expected marker in juceaide CMakeLists.txt")
+
+    patch = """if(DEFINED JUCE_TOOL_JUCEAIDE)
+    message(STATUS \"Using provided juceaide: ${JUCE_TOOL_JUCEAIDE}\")
+
+    add_executable(juceaide IMPORTED GLOBAL)
+    set_target_properties(juceaide PROPERTIES IMPORTED_LOCATION \"${JUCE_TOOL_JUCEAIDE}\")
+    add_executable(juce::juceaide ALIAS juceaide)
+
+    get_filename_component(_juce_juceaide_name \"${JUCE_TOOL_JUCEAIDE}\" NAME)
+    set(JUCE_JUCEAIDE_NAME \"${_juce_juceaide_name}\" CACHE INTERNAL \"The name of the juceaide program\")
+elseif(JUCE_BUILD_HELPER_TOOLS)"""
+
+    text = text.replace(marker, patch, 1)
+    cmake_file.write_text(text, encoding="utf-8")
+    print("Patched JUCE juceaide to honor JUCE_TOOL_JUCEAIDE")
+PY
 
 # Set CMake to find JUCE automatically
 ENV CMAKE_PREFIX_PATH=${JUCE_PATH}

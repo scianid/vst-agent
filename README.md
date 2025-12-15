@@ -180,3 +180,10 @@ Build & Push Docker
 docker stop vibevst
 docker rm vibevst
 docker run -it -d --name vibevst -p 5173:5173 -p 3000:3000 -v ${PWD}/MyPlugins:/home/dev/MyPlugins -v ${PWD}/web:/home/dev/web vibevst-env
+
+
+--------------------------
+
+docker stop vibevst; 
+docker rm vibevst; 
+docker run -it -d --name vibevst -p 5173:5173 -p 3001:3001 -v ${PWD}/MyPlugins:/home/dev/MyPlugins -v ${PWD}/web:/home/dev/web vibevst-env:patched

@@ -30,7 +30,6 @@ export function Create() {
   const [projectName, setProjectName] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [, setError] = useState('')
-  const [downloadUrl, setDownloadUrl] = useState('')
   const [downloads, setDownloads] = useState<{ linux: DownloadLinks, windows: DownloadLinks, mac: DownloadLinks }>({ 
     linux: { vst3: null, standalone: null }, 
     windows: { vst3: null, standalone: null },
@@ -39,6 +38,8 @@ export function Create() {
   const [fileTree, setFileTree] = useState<FileNode[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
+  const pendingSaveTimeoutRef = useRef<number | null>(null)
+  const lastEditSeqRef = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
   const [isConnected, setIsConnected] = useState(false)
@@ -97,7 +98,6 @@ export function Create() {
     setProjectName(name)
     setLogs([])
     setError('')
-    setDownloadUrl('')
     setPrompt('')
     setFileTree([])
     setSelectedFile(null)
@@ -188,7 +188,6 @@ export function Create() {
     setProjectName('')
     setLogs([])
     setError('')
-    setDownloadUrl('')
     setDownloads({ 
       linux: { vst3: null, standalone: null }, 
       windows: { vst3: null, standalone: null },
@@ -232,6 +231,13 @@ export function Create() {
   const fetchFileContent = async (filePath: string) => {
     if (!projectName) return
     setSelectedFile(filePath)
+
+    // Cancel any pending save when switching files
+    if (pendingSaveTimeoutRef.current) {
+      window.clearTimeout(pendingSaveTimeoutRef.current)
+      pendingSaveTimeoutRef.current = null
+    }
+
     try {
       const response = await fetch(`/api/files/${projectName}/content?path=${encodeURIComponent(filePath)}`)
       if (response.ok) {
@@ -241,6 +247,45 @@ export function Create() {
     } catch (err) {
       setFileContent('// Failed to load file')
     }
+  }
+
+  const saveFileContent = async (filePath: string, content: string) => {
+    if (!projectName) return
+    const response = await fetch(`/api/files/${projectName}/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath, content })
+    })
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data?.error || 'Failed to save file')
+    }
+  }
+
+  const handleEditFileContent = (newContent: string) => {
+    setFileContent(newContent)
+
+    if (!projectName || !selectedFile) return
+
+    lastEditSeqRef.current += 1
+    const editSeq = lastEditSeqRef.current
+
+    if (pendingSaveTimeoutRef.current) {
+      window.clearTimeout(pendingSaveTimeoutRef.current)
+      pendingSaveTimeoutRef.current = null
+    }
+
+    // Debounced save so we don't POST on every keystroke
+    pendingSaveTimeoutRef.current = window.setTimeout(async () => {
+      if (editSeq !== lastEditSeqRef.current) return
+      try {
+        await saveFileContent(selectedFile, newContent)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        addLog(`Save error: ${message}`, 'error')
+      }
+    }, 500)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -257,7 +302,6 @@ export function Create() {
     setStatus('generating')
     setError('')
     setLogs([])
-    setDownloadUrl('')
 
     // Generate project name from prompt with unique suffix
     const baseName = prompt.split(' ').slice(0, 2).join('').replace(/[^a-zA-Z0-9]/g, '') || 'MyPlugin'
@@ -438,19 +482,6 @@ export function Create() {
     }
   }
 
-  const handlePlatformChange = (newPlatform: 'linux' | 'windows' | 'mac') => {
-    setPlatform(newPlatform)
-    // Check if compiled for new platform
-    if (projectName) {
-      // We already have the downloads state, just update status
-      if (downloads[newPlatform].vst3 || downloads[newPlatform].standalone) {
-        setStatus('compiled')
-      } else {
-        setStatus('generated')
-      }
-    }
-  }
-
   const handleCompile = async (platformOverride?: 'linux' | 'windows' | 'mac') => {
     if (!projectName) return
 
@@ -500,7 +531,6 @@ export function Create() {
                   break
                 case 'complete':
                   addLog(data.message, 'success')
-                  setDownloadUrl(data.downloadUrl)
                   setDownloads(prev => ({
                     ...prev,
                     [targetPlatform]: {
@@ -581,12 +611,11 @@ export function Create() {
           fileTree={fileTree}
           selectedFile={selectedFile}
           fileContent={fileContent}
+          onEditFileContent={handleEditFileContent}
           logs={logs}
           status={status}
           downloads={downloads}
           isWorking={isWorking}
-          platform={platform}
-          onPlatformChange={handlePlatformChange}
           onCompile={handleCompile}
           onClean={handleClean}
           onSelectFile={fetchFileContent}

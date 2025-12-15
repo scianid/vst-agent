@@ -497,9 +497,64 @@ app.post('/api/compile', async (req, res) => {
     appendLog(projectDir, payload)
   }
 
+  async function ensureCMakeListsHasHostJuceaideHint() {
+    if (platform !== 'windows' && platform !== 'mac') return
+
+    const cmakePath = path.join(projectDir, 'CMakeLists.txt')
+    let cmakeContent = ''
+
+    try {
+      cmakeContent = await fs.readFile(cmakePath, 'utf-8')
+    } catch {
+      return
+    }
+
+    if (cmakeContent.includes('CMAKE_CROSSCOMPILING') || cmakeContent.includes('JUCE_TOOL_JUCEAIDE')) {
+      return
+    }
+
+    const hintBlock = `
+
+# If we're cross-compiling, JUCE still needs a host-built juceaide binary.
+# When available, point JUCE at a build_host output to avoid JUCE trying to
+# bootstrap/build juceaide during the target configure step.
+if(CMAKE_CROSSCOMPILING)
+    set(_vibevst_host_juceaide_candidates
+        "\${CMAKE_SOURCE_DIR}/build_host/JUCE/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+        "\${CMAKE_SOURCE_DIR}/build_host/JUCE/tools/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+        "\${CMAKE_SOURCE_DIR}/build_host/JUCE/tools/extras/Build/juceaide/juceaide_artefacts/Debug/juceaide"
+        "\${CMAKE_SOURCE_DIR}/build_host/juceaide_artefacts/Release/juceaide")
+
+    foreach(_cand IN LISTS _vibevst_host_juceaide_candidates)
+        if(EXISTS "\${_cand}")
+            message(STATUS "VibeVST: using host juceaide at \${_cand}")
+            set(JUCE_TOOL_JUCEAIDE "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+            set(JUCE_HOST_JUCEAIDE "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+            set(JUCEAIDE_PATH "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+`
+
+    const anchor = 'set(CMAKE_CXX_STANDARD_REQUIRED ON)'
+    if (cmakeContent.includes(anchor)) {
+      cmakeContent = cmakeContent.replace(anchor, `${anchor}${hintBlock}`)
+    } else if (cmakeContent.includes('# Add JUCE')) {
+      cmakeContent = cmakeContent.replace('# Add JUCE', `${hintBlock}\n# Add JUCE`)
+    } else {
+      cmakeContent = `${hintBlock}\n${cmakeContent}`
+    }
+
+    await fs.writeFile(cmakePath, cmakeContent)
+    sendEvent('log', { message: 'Updated CMakeLists.txt to prefer host-built juceaide for cross-compilation.' })
+  }
+
   try {
     // Check if project exists
     await fs.access(projectDir)
+
+    await ensureCMakeListsHasHostJuceaideHint()
 
     console.log(`Compiling: ${projectName} for ${platform}`)
     sendEvent('log', { message: `Starting compilation for ${platform}...` })
@@ -606,6 +661,10 @@ app.post('/api/compile', async (req, res) => {
         '-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc',
         '-DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++',
         '-DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres',
+        // VST3 SDK (and MinGW headers) require a sufficiently new WinAPI level
+        // for SHGetKnownFolderPath to be declared.
+        '-DCMAKE_C_FLAGS=-D_WIN32_WINNT=0x0602 -DWINVER=0x0602 -DNTDDI_VERSION=0x06020000',
+        '-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0602 -DWINVER=0x0602 -DNTDDI_VERSION=0x06020000',
         '-DJUCE_BUILD_HELPER_TOOLS=OFF', // Disable helper tools for cross-compilation
         '-DCMAKE_EXE_LINKER_FLAGS=-static', // Statically link libraries to avoid missing DLL errors
         '-DCMAKE_SHARED_LINKER_FLAGS=-static',
@@ -631,6 +690,72 @@ app.post('/api/compile', async (req, res) => {
       env.OSXCROSS_TARGET_DIR = '/opt/osxcross/target'
       env.OSXCROSS_TARGET = 'darwin20.4'
       env.OSXCROSS_SDK = '/opt/osxcross/target/SDK/MacOSX11.3.sdk'
+    } else if (platform === 'windows') {
+      // The JUCE VST3 moduleinfo generator is built for the target (Windows) and
+      // cannot be executed on the Linux host during cross-compilation.
+      // We inject a host-runnable shim named 'juce_vst3_helper' via PATH.
+      env.VIBEVST_PROJECT_NAME = projectName
+      env.VIBEVST_PROJECT_VERSION = '1.0.0'
+      env.VIBEVST_COMPANY_NAME = 'VibeVST'
+
+      const buildDirPath = path.join(projectDir, buildDirName)
+      env.PATH = `${buildDirPath}:${env.PATH || ''}`
+    }
+
+    const ensureWindowsVst3HelperShim = async () => {
+      if (platform !== 'windows') return
+
+      const buildDirPath = path.join(projectDir, buildDirName)
+      await fs.mkdir(buildDirPath, { recursive: true })
+
+      const helperPath = path.join(buildDirPath, 'juce_vst3_helper')
+      const backupPath = path.join(buildDirPath, 'juce_vst3_helper.bak')
+
+      try {
+        await fs.access(helperPath)
+        // Don't overwrite a real helper without keeping it around.
+        await fs.rename(helperPath, backupPath)
+      } catch {}
+
+      const shim = `#!/usr/bin/env bash
+set -euo pipefail
+
+OUTPUT_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -output)
+      OUTPUT_FILE="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "$OUTPUT_FILE" ]]; then
+  mkdir -p "$(dirname "$OUTPUT_FILE")"
+  cat > "$OUTPUT_FILE" <<JSONEOF
+{
+  "Name": "\${VIBEVST_PROJECT_NAME:-VST3Plugin}",
+  "Version": "\${VIBEVST_PROJECT_VERSION:-1.0.0}",
+  "Factory Info": {
+    "Vendor": "\${VIBEVST_COMPANY_NAME:-VibeVST}",
+    "URL": "",
+    "E-Mail": ""
+  },
+  "Compatibility": {
+    "Classes": []
+  }
+}
+JSONEOF
+fi
+
+exit 0
+`
+
+      await fs.writeFile(helperPath, shim)
+      await execAsync(`chmod +x "${helperPath}"`)
     }
 
     const runConfigure = () => new Promise((resolve, reject) => {
@@ -673,6 +798,9 @@ app.post('/api/compile', async (req, res) => {
       // Retry once
       await runConfigure()
     }
+
+    // Windows cross-compile: ensure the VST3 helper shim exists before building.
+    await ensureWindowsVst3HelperShim()
 
     // Build
     const buildCmd = `cmake --build ${buildDirName} --config Release -j$(nproc)`
@@ -1137,6 +1265,36 @@ app.get('/api/files/:projectName/content', async (req, res) => {
   }
 })
 
+// Save file content
+app.put('/api/files/:projectName/content', async (req, res) => {
+  const { projectName } = req.params
+  const { path: filePath, content } = req.body || {}
+
+  if (!projectName || !filePath || typeof content !== 'string') {
+    return res.status(400).json({ error: 'Missing project name, file path, or content' })
+  }
+
+  const projectDir = path.join(PLUGINS_DIR, projectName)
+  const fullPath = path.join(projectDir, filePath)
+
+  // Security check - ensure path is within project directory
+  const resolvedPath = path.resolve(fullPath)
+  const resolvedProjectDir = path.resolve(projectDir)
+
+  if (!resolvedPath.startsWith(resolvedProjectDir)) {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+
+  try {
+    await fs.writeFile(fullPath, content, 'utf-8')
+    const stats = await fs.stat(fullPath)
+    res.json({ success: true, size: stats.size, modified: stats.mtime })
+  } catch (error) {
+    console.error('File write error:', error)
+    res.status(500).json({ error: 'Failed to write file' })
+  }
+})
+
 // Helper function to build file tree recursively
 async function buildFileTree(baseDir, relativePath) {
   const fullPath = relativePath ? path.join(baseDir, relativePath) : baseDir
@@ -1215,12 +1373,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # When available, point JUCE at the standard build_host output to avoid JUCE
 # trying to bootstrap/build juceaide during the target configure step.
 if(CMAKE_CROSSCOMPILING)
-    set(_vibevst_host_juceaide "\${CMAKE_SOURCE_DIR}/build_host/JUCE/extras/Build/juceaide/juceaide_artefacts/Release/juceaide")
-    if(EXISTS "\${_vibevst_host_juceaide}")
-        set(JUCE_TOOL_JUCEAIDE "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
-        set(JUCE_HOST_JUCEAIDE "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
-        set(JUCEAIDE_PATH "\${_vibevst_host_juceaide}" CACHE FILEPATH "Host juceaide" FORCE)
+  set(_vibevst_host_juceaide_candidates
+    "\${CMAKE_SOURCE_DIR}/build_host/JUCE/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+    "\${CMAKE_SOURCE_DIR}/build_host/JUCE/tools/extras/Build/juceaide/juceaide_artefacts/Release/juceaide"
+    "\${CMAKE_SOURCE_DIR}/build_host/JUCE/tools/extras/Build/juceaide/juceaide_artefacts/Debug/juceaide"
+    "\${CMAKE_SOURCE_DIR}/build_host/juceaide_artefacts/Release/juceaide")
+
+  foreach(_cand IN LISTS _vibevst_host_juceaide_candidates)
+    if(EXISTS "\${_cand}")
+      message(STATUS "VibeVST: using host juceaide at \${_cand}")
+      set(JUCE_TOOL_JUCEAIDE "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+      set(JUCE_HOST_JUCEAIDE "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+      set(JUCEAIDE_PATH "\${_cand}" CACHE FILEPATH "Host juceaide" FORCE)
+      break()
     endif()
+  endforeach()
 endif()
 
 # Add JUCE

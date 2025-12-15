@@ -36,12 +36,11 @@ interface IdeLayoutProps {
   fileTree: FileNode[]
   selectedFile: string | null
   fileContent: string
+  onEditFileContent?: (newContent: string) => void
   logs: LogEntry[]
   status: 'idle' | 'generating' | 'generated' | 'compiling' | 'compiled' | 'error'
   downloads: { linux: DownloadLinks, windows: DownloadLinks, mac: DownloadLinks }
   isWorking: boolean
-  platform: 'linux' | 'windows' | 'mac'
-  onPlatformChange: (platform: 'linux' | 'windows' | 'mac') => void
   onCompile: (platform?: 'linux' | 'windows' | 'mac') => void
   onClean: (platform: 'linux' | 'windows' | 'mac') => void
   onSelectFile: (path: string) => void
@@ -110,12 +109,11 @@ export function IdeLayout({
   fileTree,
   selectedFile,
   fileContent,
+  onEditFileContent,
   logs,
   status,
   downloads,
   isWorking,
-  platform,
-  onPlatformChange,
   onCompile,
   onClean,
   onSelectFile,
@@ -748,8 +746,12 @@ export function IdeLayout({
                   language={getLanguageFromPath(selectedFile)}
                   value={fileContent}
                   theme="vs-dark"
+                  onChange={(value) => {
+                    if (!onEditFileContent) return
+                    onEditFileContent(value ?? '')
+                  }}
                   options={{
-                    readOnly: true,
+                    readOnly: false,
                     minimap: { enabled: false },
                     fontSize: 13,
                     padding: { top: 16 },
