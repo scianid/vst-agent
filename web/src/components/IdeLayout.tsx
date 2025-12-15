@@ -196,14 +196,69 @@ export function IdeLayout({
     return 'plaintext'
   }
 
+  const buildFixContextFromLogs = (allLogs: LogEntry[]) => {
+    const compilationTypes = new Set<LogEntry['type']>(['log', 'info', 'error'])
+    const compilationLike = allLogs.filter(l => compilationTypes.has(l.type))
+
+    const startRegex = /Starting compilation for|Building host tools|Configuring host tools|Compiling host tools|\bcmake\b|\bninja\b|CMake Error|CMake Warning/i
+    let startIndex = 0
+    for (let i = compilationLike.length - 1; i >= 0; i--) {
+      if (startRegex.test(compilationLike[i].message || '')) {
+        startIndex = i
+        break
+      }
+    }
+
+    const windowEntries = compilationLike.slice(startIndex)
+    const allLines = windowEntries
+      .flatMap(e => (e.message || '').split('\n'))
+      .map(l => l.trimEnd())
+      .filter(Boolean)
+
+    const errorRegex = /(fatal error:|\berror\b:|undefined reference|ld:|collect2:|ninja: build stopped|CMake Error:|cannot find -l|linker command failed)/i
+    const context = new Set<number>()
+    for (let i = 0; i < allLines.length; i++) {
+      if (!errorRegex.test(allLines[i])) continue
+      for (let j = Math.max(0, i - 2); j <= Math.min(allLines.length - 1, i + 2); j++) {
+        context.add(j)
+      }
+    }
+
+    const keyErrorLines = Array.from(context)
+      .sort((a, b) => a - b)
+      .map(i => allLines[i])
+      .slice(0, 120)
+
+    const tailLines = allLines.slice(-200)
+
+    const assembled = [
+      'KEY ERRORS (with context):',
+      ...(keyErrorLines.length ? keyErrorLines : ['(none detected; see tail)']),
+      '',
+      'BUILD LOG TAIL:',
+      ...tailLines
+    ].join('\n')
+
+    // Keep payload efficient to avoid burning tokens
+    return assembled.slice(-16000)
+  }
+
   const handleFixError = () => {
-    const recentLogs = logs
-      .slice(-100)
-      .map(l => l.message)
-      .join('\n')
-      .slice(-50000) // Limit to last 50k chars to avoid payload too large
-    
-    onSendPrompt(`The compilation failed. Please analyze the logs and fix the issue.\n\nLogs:\n${recentLogs}`)
+    const buildContext = buildFixContextFromLogs(logs)
+
+    onSendPrompt(
+      [
+        'The build failed. Fix the underlying issue.',
+        '',
+        'Constraints:',
+        '- Do NOT run any shell/build commands (no cmake/ninja/bash compile).',
+        '- Only edit the project files (C++/CMake) to resolve the failure.',
+        '- Keep the fix minimal and cross-platform.',
+        '',
+        'Build log excerpt:',
+        buildContext
+      ].join('\n')
+    )
   }
 
   // Filter logs for chat view
